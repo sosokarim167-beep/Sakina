@@ -6,7 +6,7 @@
 // "تثبيت التطبيق" في متصفح Chrome.
 // ============================================================
 
-var CACHE_NAME = "sakina-cache-v2";
+var CACHE_NAME = "sakina-cache-v4";
 
 // عند التثبيت: تفعيل فوري بدون انتظار إغلاق كل التبويبات القديمة
 self.addEventListener("install", function (event) {
