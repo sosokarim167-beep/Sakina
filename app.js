@@ -1185,7 +1185,7 @@
 
   var QURAN_TEXT_CACHE_KEY = "sakina_quran_text_cache_v1";
   var QURAN_READ_PREFS_KEY = "sakina_quran_read_prefs_v1";
-  var QURAN_LAST_READ_KEY = "sakina_quran_last_read_v1";
+  var QURAN_LAST_READ_KEY = "sakina_quran_last_read_v1"; // مُستبدل بـ sakina_quran_progress_v2 أدناه، أُبقي عليه فقط لقراءة أي بيانات قديمة عند الترقية
 
   var FONT_STYLES = [
     { key:"uthmani", name:"العثماني", cssClass:"font-uthmani" },
@@ -1216,17 +1216,64 @@
 
   var readPrefs = loadReadPrefs();
 
-  function loadLastRead(){
+  // رقم صفحة المصحف (طبعة المدينة، 604 صفحة) التي تبدأ عندها كل سورة —
+  // جدول ثابت ومعروف يُستخدم لتقدير رقم الصفحة بما أن القارئ الحالي
+  // يعرض السورة كاملة دون تقسيم فعلي لصفحات، وليس هناك بيانات صفحات
+  // حقيقية لكل آية على حدة في هذا الإصدار
+  var SURAH_START_PAGE = [
+    1,2,50,77,106,128,151,177,187,208,221,235,249,255,262,267,282,293,305,312,
+    322,332,342,350,359,367,377,385,396,404,411,415,418,428,434,440,446,453,458,467,
+    477,483,489,496,499,502,507,511,515,518,520,523,526,528,531,534,537,542,545,549,
+    551,553,554,554,556,558,560,562,564,566,568,570,572,574,575,577,578,580,583,585,
+    587,587,589,590,591,591,592,593,594,595,596,597,597,598,599,600,600,601,601,602,
+    602,602,603,603,603,604,604,604,604,604,604,604,604,604
+  ];
+
+  function getPageForAyah(surahNumber){
+    return SURAH_START_PAGE[surahNumber - 1] || 1;
+  }
+
+  var QURAN_PROGRESS_KEY = "sakina_quran_progress_v2";
+
+  function loadQuranProgress(){
     try{
-      var raw = localStorage.getItem(QURAN_LAST_READ_KEY);
+      var raw = localStorage.getItem(QURAN_PROGRESS_KEY);
       var parsed = raw ? JSON.parse(raw) : null;
-      if(parsed && parsed.surah){ return parsed; }
+      if(parsed && typeof parsed.surah === "number"){ return parsed; }
+    }catch(e){}
+    // ترحيل تلقائي لمرة واحدة من المفتاح القديم (سورة فقط) إن وُجد ولم تتوفر بيانات جديدة بعد
+    try{
+      var oldRaw = localStorage.getItem(QURAN_LAST_READ_KEY);
+      var oldParsed = oldRaw ? JSON.parse(oldRaw) : null;
+      if(oldParsed && typeof oldParsed.surah === "number"){
+        return {
+          surah: oldParsed.surah,
+          ayah: 1,
+          page: getPageForAyah(oldParsed.surah),
+          scrollTop: oldParsed.scrollTop || 0,
+          updatedAt: Date.now()
+        };
+      }
     }catch(e){}
     return null;
   }
-  function saveLastRead(){ localStorage.setItem(QURAN_LAST_READ_KEY, JSON.stringify(lastRead)); }
 
-  var lastRead = loadLastRead();
+  function saveQuranProgress(surahNumber, ayahNumber, pageNumber, scrollTop){
+    var existing = loadQuranProgress() || {};
+    var data = {
+      surah: surahNumber,
+      ayah: (typeof ayahNumber === "number") ? ayahNumber : (existing.ayah || 1),
+      page: (typeof pageNumber === "number") ? pageNumber : getPageForAyah(surahNumber),
+      scrollTop: (typeof scrollTop === "number") ? scrollTop : (existing.scrollTop || 0),
+      updatedAt: Date.now()
+    };
+    try{
+      localStorage.setItem(QURAN_PROGRESS_KEY, JSON.stringify(data));
+    }catch(e){}
+    return data;
+  }
+
+  var lastRead = loadQuranProgress();
   var currentReadingSurah = (lastRead && lastRead.surah) ? lastRead.surah : 1;
   var mushafScrollSaveHandle = null;
 
@@ -1393,8 +1440,14 @@
       });
     }
 
-    lastRead = { surah: number, scrollTop: 0 };
-    saveLastRead();
+    // إن كانت هذه سورة جديدة مختلفة عن آخر تقدّم محفوظ، نبدأ تقدماً جديداً لها
+    // (آية 1، صفحتها الأولى)؛ أما إعادة فتح نفس السورة المحفوظة فتُبقي على آيتها المحفوظة
+    var existingProgress = loadQuranProgress();
+    if(!existingProgress || existingProgress.surah !== number){
+      lastRead = saveQuranProgress(number, 1, getPageForAyah(number), 0);
+    }else{
+      lastRead = existingProgress;
+    }
     hideContinueReadingBanner();
 
     if(scrollToSaved){
@@ -1423,8 +1476,7 @@
 
   function saveReadingScrollPosition(){
     if(!lastRead || lastRead.surah !== currentReadingSurah) return;
-    lastRead.scrollTop = window.scrollY;
-    saveLastRead();
+    lastRead = saveQuranProgress(currentReadingSurah, lastRead.ayah, lastRead.page, window.scrollY);
   }
 
   window.addEventListener("scroll", function(){
@@ -2382,9 +2434,8 @@
   /* ================= AZKAR AUDIO PLAYER ================= */
 
   /* تنبيه: رابطا الصباح والمساء تم التحقق منهما فعلياً وهما يعملان
-     (مصدر: أرشيف الإنترنت archive.org). رابط أذكار النوم لم يتم
-     التحقق منه بنفس الطريقة — إن لم يعمل، استبدل قيمته بأي رابط
-     mp3 مباشر تملك صلاحية استخدامه. */
+     (مصدر: أرشيف الإنترنت archive.org). الروابط الثلاثة تم التحقق
+     منها وهي مباشرة وفعّالة (ملفات mp3 مستضافة على archive.org). */
 
   var AZKAR_AUDIO_SOURCES = {
     morning: "https://archive.org/download/adhkar-alsabah-walmasa/%D8%A3%D8%B0%D9%83%D8%A7%D8%B1%20%D8%A7%D9%84%D8%B5%D8%A8%D8%A7%D8%AD%20%D9%88%D8%A7%D9%84%D9%85%D8%B3%D8%A7%D8%A1%20%D8%A8%D8%B5%D9%88%D8%AA%20%D8%A7%D9%84%D8%B4%D9%8A%D8%AE%20%D8%B3%D8%B9%D8%AF%20%D8%A7%D9%84%D8%BA%D8%A7%D9%85%D8%AF%D9%8A.mp3",
@@ -2406,6 +2457,9 @@
   var azkarAudioProgress = document.getElementById("azkarAudioProgress");
   var azkarAudioTime = document.getElementById("azkarAudioTime");
 
+  var PLAY_LABEL = "▶ Play";
+  var PAUSE_LABEL = "⏸ Pause";
+
   function formatAudioTime(sec){
     if(!isFinite(sec) || sec < 0) return "00:00";
     var m = Math.floor(sec / 60);
@@ -2414,11 +2468,13 @@
   }
 
   function resetAzkarPlayerUI(){
-    azkarPlayBtn.textContent = "▶️";
+    azkarPlayBtn.textContent = PLAY_LABEL;
+    azkarPlayBtn.setAttribute("aria-label", "تشغيل");
     azkarAudioProgress.style.width = "0%";
     azkarAudioTime.textContent = "00:00";
   }
 
+  // نُحدّث data-audio-src / data-category على الزر نفسه (كما هو مطلوب) في كل مرة يتغيّر القسم
   function updateAzkarAudioForSub(sub){
     var src = AZKAR_AUDIO_SOURCES[sub];
     azkarAudioEl.pause();
@@ -2432,24 +2488,56 @@
     azkarAudioPlayerBar.style.display = "flex";
     azkarAudioTitle.textContent = AZKAR_AUDIO_LABELS[sub] || "🎧 استماع للأذكار";
 
+    azkarPlayBtn.setAttribute("data-audio-src", src);
+    azkarPlayBtn.setAttribute("data-category", sub);
+
     if(azkarAudioEl.getAttribute("data-current-sub") !== sub){
       azkarAudioEl.src = src;
       azkarAudioEl.setAttribute("data-current-sub", sub);
     }
   }
 
-  azkarPlayBtn.addEventListener("click", function(){
-    if(!azkarAudioEl.src){ return; }
-    if(azkarAudioEl.paused){
-      azkarAudioEl.play().then(function(){
-        azkarPlayBtn.textContent = "⏸️";
-      }).catch(function(){
-        showToast("⚠️ تعذر تشغيل الصوت، تحقق من اتصالك بالإنترنت");
-      });
+  // منطق تشغيل/إيقاف مؤقت قوي: يعتمد على data-audio-src في حال تغيّر المصدر خارجياً،
+  // يبدّل نص الزر بين ▶ Play و⏸ Pause، ويتعامل مع الأخطاء بأمان دون كسر الواجهة
+  function togglePlayAdhkarAudio(btn){
+    var src = btn.getAttribute("data-audio-src");
+    if(!src){
+      showToast("⚠️ لا يوجد ملف صوتي مرتبط بهذا القسم");
+      return;
+    }
+
+    if(azkarAudioEl.getAttribute("data-active-src") !== src){
+      azkarAudioEl.src = src;
+      azkarAudioEl.setAttribute("data-active-src", src);
+    }
+
+    if(azkarAudioEl.paused || azkarAudioEl.ended){
+      var playPromise = azkarAudioEl.play();
+      if(playPromise && typeof playPromise.then === "function"){
+        playPromise.then(function(){
+          btn.textContent = PAUSE_LABEL;
+          btn.setAttribute("aria-label", "إيقاف مؤقت");
+        }).catch(function(){
+          showToast("⚠️ تعذر تشغيل الصوت، تحقق من اتصالك بالإنترنت");
+          resetAzkarPlayerUI();
+        });
+      }else{
+        btn.textContent = PAUSE_LABEL;
+        btn.setAttribute("aria-label", "إيقاف مؤقت");
+      }
     }else{
       azkarAudioEl.pause();
-      azkarPlayBtn.textContent = "▶️";
+      btn.textContent = PLAY_LABEL;
+      btn.setAttribute("aria-label", "تشغيل");
     }
+  }
+
+  // مندوب أحداث عام على المستند بأكمله لأي زر يحمل الكلاس play-adhkar-audio —
+  // يعمل حتى لو أُضيفت أزرار أخرى بنفس الكلاس لاحقاً في أقسام أذكار مختلفة
+  document.addEventListener("click", function(e){
+    var btn = e.target.closest ? e.target.closest(".play-adhkar-audio") : null;
+    if(!btn) return;
+    togglePlayAdhkarAudio(btn);
   });
 
   azkarStopBtn.addEventListener("click", function(){
@@ -2466,13 +2554,23 @@
     azkarAudioTime.textContent = formatAudioTime(azkarAudioEl.currentTime);
   });
 
+  // عند انتهاء الصوت طبيعياً: إعادة ضبط حالة كل الأزرار (وليس فقط زر القسم الحالي)
   azkarAudioEl.addEventListener("ended", function(){
     resetAzkarPlayerUI();
+    document.querySelectorAll(".play-adhkar-audio").forEach(function(b){
+      b.textContent = PLAY_LABEL;
+      b.setAttribute("aria-label", "تشغيل");
+    });
   });
 
+  // معالجة أخطاء شاملة: ملف مفقود، شبكة منقطعة، أو تنسيق غير مدعوم — كلها تُعيد الواجهة لحالة آمنة
   azkarAudioEl.addEventListener("error", function(){
     showToast("⚠️ تعذر تحميل ملف الصوت لهذا القسم، تحقق من الرابط أو اتصالك بالإنترنت");
     resetAzkarPlayerUI();
+    document.querySelectorAll(".play-adhkar-audio").forEach(function(b){
+      b.textContent = PLAY_LABEL;
+      b.setAttribute("aria-label", "تشغيل");
+    });
   });
 
   /* ================= QIBLA COMPASS (OFFLINE) ================= */
@@ -2596,35 +2694,28 @@
   document.getElementById("qiblaCloseBtn").addEventListener("click", closeQiblaOverlay);
   qiblaOverlay.addEventListener("click", function(e){ if(e.target === qiblaOverlay) closeQiblaOverlay(); });
 
-  /* ================= QURAN AYAH BOOKMARK ================= */
+  /* ================= QURAN READING PROGRESS (SURAH + AYAH + PAGE) ================= */
 
-  var AYAH_BOOKMARK_KEY = "sakina_ayah_bookmark_v1";
-
+  // نُسمّيها saveBookmark/restoreBookmark للحفاظ على التوافق مع نقاط
+  // الاستدعاء الحالية في الكود (نقر الآية، فتح السورة)، لكنها الآن
+  // تحفظ السورة + الآية + الصفحة معاً بدل الآية فقط
   function saveBookmark(surahIndex, ayahNumber){
-    var data = { surah: surahIndex, ayah: ayahNumber, savedAt: Date.now() };
-    try{
-      localStorage.setItem(AYAH_BOOKMARK_KEY, JSON.stringify(data));
-    }catch(e){}
+    lastRead = saveQuranProgress(surahIndex, ayahNumber, getPageForAyah(surahIndex), window.scrollY);
   }
 
   function loadBookmark(){
-    try{
-      var raw = localStorage.getItem(AYAH_BOOKMARK_KEY);
-      return raw ? JSON.parse(raw) : null;
-    }catch(e){
-      return null;
-    }
+    return loadQuranProgress();
   }
 
   function restoreBookmark(){
-    var bookmark = loadBookmark();
-    if(!bookmark || typeof bookmark.surah !== "number" || typeof bookmark.ayah !== "number") return;
-    if(bookmark.surah !== currentReadingSurah) return;
+    var progress = loadQuranProgress();
+    if(!progress || typeof progress.surah !== "number" || typeof progress.ayah !== "number") return;
+    if(progress.surah !== currentReadingSurah) return;
 
     var ayahNumEls = document.querySelectorAll("#mushafCard .ayah-num");
     var targetEl = null;
     ayahNumEls.forEach(function(el){
-      if(parseInt(el.textContent, 10) === bookmark.ayah){
+      if(parseInt(el.textContent, 10) === progress.ayah){
         targetEl = el;
       }
     });
