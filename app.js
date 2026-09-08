@@ -250,7 +250,15 @@
       return Array.isArray(parsed) ? parsed : [];
     }catch(e){ return []; }
   }
-  function saveHabits(){ localStorage.setItem(HABITS_KEY, JSON.stringify(habits)); }
+  // localStorage هو دائماً مصدر الحقيقة الأول ويُكتب فوراً ومتزامناً؛
+  // مزامنة Firestore محاولة إضافية غير حاجبة (best-effort) تعمل فقط
+  // عند توفر window.SakinaCloud واتصال بالإنترنت، ولا تُعطّل أي شيء إن غابت
+  function saveHabits(){
+    localStorage.setItem(HABITS_KEY, JSON.stringify(habits));
+    if(window.SakinaCloud && window.SakinaCloud.isReady() && window.SakinaCloud.isOnline()){
+      window.SakinaCloud.syncHabits(habits);
+    }
+  }
 
   var habits = loadHabits();
 
@@ -1123,7 +1131,29 @@
     }
     renderSurahList(document.getElementById("surahSearchInput").value);
     updatePlayIndicators();
+    updateMediaSessionMetadata(number, name, reciter.name);
   }
+
+  function playNextSurah(){
+    if(currentPlayingSurah === null) return;
+    var nextNumber = currentPlayingSurah + 1;
+    if(nextNumber <= 114){
+      var nextSurah = SURAHS[nextNumber - 1];
+      loadAndPlaySurah(nextSurah[0], nextSurah[1], true);
+    }
+  }
+
+  function playPreviousSurah(){
+    if(currentPlayingSurah === null) return;
+    var prevNumber = currentPlayingSurah - 1;
+    if(prevNumber >= 1){
+      var prevSurah = SURAHS[prevNumber - 1];
+      loadAndPlaySurah(prevSurah[0], prevSurah[1], true);
+    }
+  }
+
+  document.getElementById("miniPlayerNext").addEventListener("click", playNextSurah);
+  document.getElementById("miniPlayerPrev").addEventListener("click", playPreviousSurah);
 
   quranAudio.addEventListener("play", updatePlayIndicators);
   quranAudio.addEventListener("pause", updatePlayIndicators);
@@ -1140,12 +1170,15 @@
     var nextNumber = currentPlayingSurah + 1;
     if(nextNumber <= 114){
       var nextSurah = SURAHS[nextNumber - 1];
-      loadAndPlaySurah(nextSurah[0], nextSurah[1], true);
       showToast("▶ التالي: سورة " + nextSurah[1]);
+      playNextSurah();
     }else{
       currentPlayingSurah = null;
       miniPlayer.classList.remove("show");
       renderSurahList(document.getElementById("surahSearchInput").value);
+      if("mediaSession" in navigator){
+        navigator.mediaSession.playbackState = "none";
+      }
     }
   });
 
@@ -1166,6 +1199,10 @@
     currentPlayingSurah = null;
     miniPlayer.classList.remove("show");
     renderSurahList(document.getElementById("surahSearchInput").value);
+    if("mediaSession" in navigator){
+      navigator.mediaSession.playbackState = "none";
+      navigator.mediaSession.metadata = null;
+    }
   });
 
   var miniRange = document.getElementById("miniPlayerRange");
@@ -1179,6 +1216,100 @@
 
   document.getElementById("surahSearchInput").addEventListener("input", function(e){
     renderSurahList(e.target.value);
+  });
+
+  /* ================= MEDIA SESSION (LOCK SCREEN / BACKGROUND CONTROLS) ================= */
+  //
+  // navigator.mediaSession يسمح للمشغّل بالاستمرار بإظهار حالته والتحكم
+  // به من شاشة القفل أو مركز التحكم أو الإشعارات حتى عند تصغير التطبيق،
+  // بشرط أن يدعم المتصفح/النظام هذه الواجهة (مدعومة في Chrome/Edge على
+  // أندرويد وسطح المكتب، وSafari على iOS بدعم جزئي)
+
+  var MEDIA_SESSION_ARTWORK = [
+    { src: "icons/icon-192.jpg", sizes: "192x192", type: "image/jpeg" },
+    { src: "icons/icon-512.jpg", sizes: "512x512", type: "image/jpeg" }
+  ];
+
+  function updateMediaSessionMetadata(surahNumber, surahName, reciterName){
+    if(!("mediaSession" in navigator)) return;
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: "سورة " + surahName,
+      artist: reciterName,
+      album: "سَكينة — تلاوة القرآن الكريم",
+      artwork: MEDIA_SESSION_ARTWORK
+    });
+
+    navigator.mediaSession.playbackState = "playing";
+  }
+
+  function setupMediaSessionActionHandlers(){
+    if(!("mediaSession" in navigator)) return;
+
+    navigator.mediaSession.setActionHandler("play", function(){
+      if(currentPlayingSurah === null) return;
+      quranAudio.play().catch(handlePlaybackError);
+      navigator.mediaSession.playbackState = "playing";
+    });
+
+    navigator.mediaSession.setActionHandler("pause", function(){
+      quranAudio.pause();
+      navigator.mediaSession.playbackState = "paused";
+    });
+
+    navigator.mediaSession.setActionHandler("previoustrack", function(){
+      playPreviousSurah();
+    });
+
+    navigator.mediaSession.setActionHandler("nexttrack", function(){
+      playNextSurah();
+    });
+
+    // تقديم/إرجاع 10 ثوانٍ داخل السورة نفسها — مدعوم في بعض الأنظمة كأزرار إضافية
+    try{
+      navigator.mediaSession.setActionHandler("seekbackward", function(details){
+        var skip = (details && details.seekOffset) || 10;
+        quranAudio.currentTime = Math.max(0, quranAudio.currentTime - skip);
+      });
+      navigator.mediaSession.setActionHandler("seekforward", function(details){
+        var skip = (details && details.seekOffset) || 10;
+        if(quranAudio.duration){
+          quranAudio.currentTime = Math.min(quranAudio.duration, quranAudio.currentTime + skip);
+        }
+      });
+      navigator.mediaSession.setActionHandler("stop", function(){
+        document.getElementById("miniPlayerStop").click();
+      });
+    }catch(e){
+      // بعض المتصفحات لا تدعم seekbackward/seekforward/stop كأفعال — يُتجاهل الخطأ بأمان
+    }
+  }
+
+  setupMediaSessionActionHandlers();
+
+  // مزامنة حالة التشغيل (تشغيل/إيقاف مؤقت) مع شاشة القفل عند أي تغيير من داخل التطبيق نفسه
+  quranAudio.addEventListener("play", function(){
+    if("mediaSession" in navigator && currentPlayingSurah !== null){
+      navigator.mediaSession.playbackState = "playing";
+    }
+  });
+  quranAudio.addEventListener("pause", function(){
+    if("mediaSession" in navigator && currentPlayingSurah !== null){
+      navigator.mediaSession.playbackState = "paused";
+    }
+  });
+
+  // تحديث موضع التشغيل الظاهر في شاشة القفل (شريط التقدّم هناك أيضاً)
+  quranAudio.addEventListener("timeupdate", function(){
+    if(!("mediaSession" in navigator) || !("setPositionState" in navigator.mediaSession)) return;
+    if(!quranAudio.duration || !isFinite(quranAudio.duration)) return;
+    try{
+      navigator.mediaSession.setPositionState({
+        duration: quranAudio.duration,
+        playbackRate: quranAudio.playbackRate,
+        position: quranAudio.currentTime
+      });
+    }catch(e){}
   });
 
   /* ================= QURAN TEXT — OFFLINE READING MODE ================= */
@@ -1270,6 +1401,9 @@
     try{
       localStorage.setItem(QURAN_PROGRESS_KEY, JSON.stringify(data));
     }catch(e){}
+    if(window.SakinaCloud && window.SakinaCloud.isReady() && window.SakinaCloud.isOnline()){
+      window.SakinaCloud.syncQuranProgress(data);
+    }
     return data;
   }
 
@@ -1960,6 +2094,124 @@
   updateEnableNotifBtnVisibility();
   updateHttpsWarning();
 
+  /* ================= SCHEDULED DHIKR REMINDERS (MORNING/EVENING) ================= */
+  //
+  // نفس منطق تنبيهات الأذان أعلاه بالضبط: فحص دوري كل 20 ثانية طوال بقاء
+  // التطبيق مفتوحاً أو يعمل في الخلفية (وليس Push حقيقي من خادم، لأن ذلك
+  // يتطلب خادم إشعارات مستقل غير متوفر هنا)، مع سجل صرف منفصل في
+  // localStorage يمنع تكرار نفس التنبيه أكثر من مرة في نفس اليوم.
+  // نافذة الصباح تبدأ في وقت الفجر، ونافذة المساء تبدأ في وقت العصر.
+
+  var DHIKR_NOTIF_KEY = "sakina_dhikr_notif_v1";
+  var DHIKR_FIRED_LOG_KEY = "sakina_dhikr_fired_log_v1";
+  var DHIKR_NOTIF_KEYS = ["morning", "evening"];
+  var DHIKR_NOTIF_LABELS = { morning: "الصباح", evening: "المساء" };
+  var DHIKR_PRAYER_ANCHOR = { morning: "fajr", evening: "asr" };
+
+  function loadDhikrNotifPrefs(){
+    try{
+      var raw = localStorage.getItem(DHIKR_NOTIF_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      if(parsed && typeof parsed === "object") return parsed;
+    }catch(e){}
+    return { morning: false, evening: false };
+  }
+  function saveDhikrNotifPrefs(){ localStorage.setItem(DHIKR_NOTIF_KEY, JSON.stringify(dhikrNotifPrefs)); }
+
+  function loadDhikrFiredLog(){
+    try{
+      var raw = localStorage.getItem(DHIKR_FIRED_LOG_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    }catch(e){ return {}; }
+  }
+  function saveDhikrFiredLog(){ localStorage.setItem(DHIKR_FIRED_LOG_KEY, JSON.stringify(dhikrFiredLog)); }
+
+  var dhikrNotifPrefs = loadDhikrNotifPrefs();
+  var dhikrFiredLog = loadDhikrFiredLog();
+
+  function renderDhikrNotifToggles(){
+    DHIKR_NOTIF_KEYS.forEach(function(key){
+      var el = document.getElementById("dhikrNotifToggle-" + key);
+      if(el) el.classList.toggle("on", !!dhikrNotifPrefs[key]);
+    });
+  }
+
+  DHIKR_NOTIF_KEYS.forEach(function(key){
+    var el = document.getElementById("dhikrNotifToggle-" + key);
+    if(!el) return;
+    el.addEventListener("click", function(){
+      var turningOn = !dhikrNotifPrefs[key];
+      if(turningOn){
+        requestNotificationPermissionIfNeeded(function(){
+          dhikrNotifPrefs[key] = true;
+          saveDhikrNotifPrefs();
+          renderDhikrNotifToggles();
+          showToast("✅ تم تفعيل تذكير أذكار " + DHIKR_NOTIF_LABELS[key]);
+        });
+      }else{
+        dhikrNotifPrefs[key] = false;
+        saveDhikrNotifPrefs();
+        renderDhikrNotifToggles();
+        showToast("🔕 تم إيقاف تذكير أذكار " + DHIKR_NOTIF_LABELS[key]);
+      }
+    });
+  });
+
+  function fireDhikrNotification(dhikrKey){
+    var label = DHIKR_NOTIF_LABELS[dhikrKey];
+    vibrate([150, 80, 150]);
+    if("Notification" in window && Notification.permission === "granted"){
+      try{
+        new Notification("حان وقت أذكار " + label, {
+          body: "سَكينة — لا تنسَ أذكار " + label + " اليوم",
+          tag: "sakina-dhikr-" + dhikrKey,
+          silent: false
+        });
+      }catch(e){}
+    }
+    showToast("📿 حان وقت أذكار " + label);
+  }
+
+  function checkDhikrNotifications(){
+    if(!prayerSettings) return;
+    var anyEnabled = DHIKR_NOTIF_KEYS.some(function(k){ return dhikrNotifPrefs[k]; });
+    if(!anyEnabled) return;
+
+    var method = CALC_METHODS[prayerSettings.method] || CALC_METHODS.mwl;
+    var tz = prayerSettings.tz;
+    var cityDate = shiftedNow(tz);
+    var y = cityDate.getUTCFullYear(), m = cityDate.getUTCMonth() + 1, d = cityDate.getUTCDate();
+    var times = computeTimes(y, m, d, prayerSettings.lat, prayerSettings.lng, tz, method, prayerSettings.madhab);
+
+    var todayStamp = y + "-" + pad(m) + "-" + pad(d);
+    var nowH = cityDate.getUTCHours();
+    var nowM = cityDate.getUTCMinutes();
+
+    DHIKR_NOTIF_KEYS.forEach(function(key){
+      if(!dhikrNotifPrefs[key]) return;
+      var anchorPrayer = DHIKR_PRAYER_ANCHOR[key];
+      var decimal = times[anchorPrayer];
+      if(typeof decimal !== "number") return;
+      var windowH = Math.floor(decimal);
+      var windowM = Math.round((decimal - windowH) * 60);
+      if(windowM === 60){ windowM = 0; windowH = (windowH + 1) % 24; }
+
+      // منع التكرار: مفتاح فريد لكل يوم + قسم (صباح/مساء) في localStorage —
+      // بمجرد صرف التنبيه مرة، لن يتكرر في نفس اليوم حتى لو أُعيد فتح
+      // التطبيق عدة مرات خلال نفس الدقيقة أو بعدها
+      var logKey = todayStamp + "_" + key;
+      if(nowH === windowH && nowM === windowM && !dhikrFiredLog[logKey]){
+        dhikrFiredLog[logKey] = true;
+        saveDhikrFiredLog();
+        fireDhikrNotification(key);
+      }
+    });
+  }
+
+  setInterval(checkDhikrNotifications, 20000);
+  renderDhikrNotifToggles();
+
   /* ================= DAILY HADITH ================= */
 
   var HADITH_DATA = [
@@ -2431,6 +2683,187 @@
     }
   });
 
+  /* ================= DUAS & RUQYAH SHARIAH (SEARCH + FAVORITES) ================= */
+
+  var DUAS_DATA = [
+    {
+      id: "ruqyah_general", category: "رقية شرعية عامة",
+      text: "بِسْمِ اللَّهِ أَرْقِيكَ، مِنْ كُلِّ شَيْءٍ يُؤْذِيكَ، مِنْ شَرِّ كُلِّ نَفْسٍ أَوْ عَيْنِ حَاسِدٍ اللَّهُ يَشْفِيكَ، بِسْمِ اللَّهِ أَرْقِيكَ",
+      source: "رواه مسلم، عن عائشة رضي الله عنها"
+    },
+    {
+      id: "ruqyah_ayat_kursi", category: "رقية شرعية عامة",
+      text: "قراءة آية الكرسي: اللَّهُ لَا إِلَٰهَ إِلَّا هُوَ الْحَيُّ الْقَيُّومُ ۚ لَا تَأْخُذُهُ سِنَةٌ وَلَا نَوْمٌ ۚ لَّهُ مَا فِي السَّمَاوَاتِ وَمَا فِي الْأَرْضِ",
+      source: "سورة البقرة، الآية 255 — من قرأها حين يصبح أُجير من الجن حتى يمسي"
+    },
+    {
+      id: "ruqyah_muawwidhat", category: "رقية شرعية عامة",
+      text: "قراءة المعوذات الثلاث (الإخلاص، الفلق، الناس) ونفثها في الكفين ومسح الجسد بهما، تُكرَّر ثلاث مرات صباحاً ومساءً",
+      source: "متفق عليه، عن عائشة رضي الله عنها — كان النبي ﷺ يفعل ذلك عند مرضه"
+    },
+    {
+      id: "hasad_protection", category: "الحسد والعين",
+      text: "أَعُوذُ بِكَلِمَاتِ اللَّهِ التَّامَّاتِ مِنْ شَرِّ مَا خَلَقَ",
+      source: "رواه مسلم، عن أبي هريرة رضي الله عنه"
+    },
+    {
+      id: "hasad_bismillah", category: "الحسد والعين",
+      text: "اللَّهُمَّ بَارِكْ فِيهِ وَلَا تَضُرَّهُ — تُقال عند رؤية ما يُعجب الإنسان من نفسه أو ماله أو غيره لدفع إصابته بالعين",
+      source: "موافق لهدي النبي ﷺ في الأمر بالتبريك عند الإعجاب بالشيء"
+    },
+    {
+      id: "morning_evening_main", category: "الصباح والمساء",
+      text: "أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ رَبِّ الْعَالَمِينَ، اللَّهُمَّ إِنِّي أَسْأَلُكَ خَيْرَ هَذَا الْيَوْمِ فَتْحَهُ وَنَصْرَهُ وَنُورَهُ وَبَرَكَتَهُ وَهُدَاهُ",
+      source: "رواه مسلم، عن أبي هريرة رضي الله عنه"
+    },
+    {
+      id: "travel_dua", category: "السفر",
+      text: "اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ، سُبْحَانَ الَّذِي سَخَّرَ لَنَا هَذَا وَمَا كُنَّا لَهُ مُقْرِنِينَ وَإِنَّا إِلَىٰ رَبِّنَا لَمُنقَلِبُونَ",
+      source: "رواه مسلم، عن ابن عمر رضي الله عنهما — دعاء ركوب وسيلة السفر"
+    },
+    {
+      id: "travel_departure", category: "السفر",
+      text: "اللَّهُمَّ إِنَّا نَسْأَلُكَ فِي سَفَرِنَا هَذَا الْبِرَّ وَالتَّقْوَى، وَمِنَ الْعَمَلِ مَا تَرْضَى، اللَّهُمَّ هَوِّنْ عَلَيْنَا سَفَرَنَا هَذَا وَاطْوِ عَنَّا بُعْدَهُ",
+      source: "رواه مسلم، عن ابن عمر رضي الله عنهما"
+    },
+    {
+      id: "illness_ruqyah", category: "المرض والشفاء",
+      text: "أَذْهِبِ الْبَاسَ رَبَّ النَّاسِ، وَاشْفِ أَنْتَ الشَّافِي، لَا شِفَاءَ إِلَّا شِفَاؤُكَ، شِفَاءً لَا يُغَادِرُ سَقَمًا",
+      source: "متفق عليه، عن عائشة رضي الله عنها — كان يقولها ﷺ للمريض مع المسح باليد"
+    },
+    {
+      id: "illness_seven_times", category: "المرض والشفاء",
+      text: "أَسْأَلُ اللَّهَ الْعَظِيمَ رَبَّ الْعَرْشِ الْعَظِيمِ أَنْ يَشْفِيَكَ (تُقال سبع مرات عند زيارة المريض)",
+      source: "رواه الترمذي وأبو داود، عن ابن عباس رضي الله عنهما، حديث حسن"
+    },
+    {
+      id: "sleep_ayat_kursi", category: "النوم",
+      text: "قراءة آية الكرسي عند النوم — من قرأها فإنه لن يزال عليه من الله حافظ ولا يقربه شيطان حتى يصبح",
+      source: "رواه البخاري، عن أبي هريرة رضي الله عنه"
+    },
+    {
+      id: "sleep_dua", category: "النوم",
+      text: "بِاسْمِكَ اللَّهُمَّ أَمُوتُ وَأَحْيَا",
+      source: "رواه البخاري، عن حذيفة رضي الله عنه"
+    },
+    {
+      id: "waswas_shaytan", category: "الوسواس وحديث النفس",
+      text: "أَعُوذُ بِاللَّهِ مِنَ الشَّيْطَانِ الرَّجِيمِ، ثم الانتهاء عن التفكير فيما يُلقيه الوسواس والاستعاذة به سبحانه",
+      source: "أمر النبي ﷺ به عند الوسواس في الصلاة أو العقيدة، رواه مسلم"
+    },
+    {
+      id: "distress_dua", category: "الكرب والهم",
+      text: "لَا إِلَٰهَ إِلَّا اللَّهُ الْعَظِيمُ الْحَلِيمُ، لَا إِلَٰهَ إِلَّا اللَّهُ رَبُّ الْعَرْشِ الْعَظِيمِ، لَا إِلَٰهَ إِلَّا اللَّهُ رَبُّ السَّمَاوَاتِ وَرَبُّ الْأَرْضِ وَرَبُّ الْعَرْشِ الْكَرِيمِ",
+      source: "متفق عليه، عن ابن عباس رضي الله عنهما — دعاء الكرب"
+    },
+    {
+      id: "debt_relief", category: "قضاء الدين والهم",
+      text: "اللَّهُمَّ اكْفِنِي بِحَلَالِكَ عَنْ حَرَامِكَ، وَأَغْنِنِي بِفَضْلِكَ عَمَّنْ سِوَاكَ",
+      source: "رواه الترمذي، عن علي بن أبي طالب رضي الله عنه"
+    },
+    {
+      id: "home_entry", category: "دخول وخروج المنزل",
+      text: "بِسْمِ اللَّهِ وَلَجْنَا، وَبِسْمِ اللَّهِ خَرَجْنَا، وَعَلَى اللَّهِ رَبِّنَا تَوَكَّلْنَا",
+      source: "رواه أبو داود، عن أبي مالك الأشعري رضي الله عنه"
+    },
+    {
+      id: "mosque_entry", category: "دخول وخروج المنزل",
+      text: "اللَّهُمَّ افْتَحْ لِي أَبْوَابَ رَحْمَتِكَ (عند دخول المسجد)، اللَّهُمَّ إِنِّي أَسْأَلُكَ مِنْ فَضْلِكَ (عند الخروج منه)",
+      source: "رواه مسلم، عن أبي حميد الساعدي رضي الله عنه"
+    }
+  ];
+
+  var DUAS_FAVORITES_KEY = "sakina_duas_favorites_v1";
+
+  function loadDuasFavorites(){
+    try{
+      var raw = localStorage.getItem(DUAS_FAVORITES_KEY);
+      var parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    }catch(e){ return []; }
+  }
+  function saveDuasFavorites(){ localStorage.setItem(DUAS_FAVORITES_KEY, JSON.stringify(duasFavorites)); }
+
+  var duasFavorites = loadDuasFavorites();
+  var duasShowFavoritesOnly = false;
+
+  function isDuaFavorite(id){ return duasFavorites.indexOf(id) !== -1; }
+
+  function toggleDuaFavorite(id){
+    var idx = duasFavorites.indexOf(id);
+    if(idx === -1){
+      duasFavorites.push(id);
+      showToast("⭐ تمت إضافة الدعاء إلى المفضّلة");
+    }else{
+      duasFavorites.splice(idx, 1);
+      showToast("☆ تمت إزالة الدعاء من المفضّلة");
+    }
+    saveDuasFavorites();
+  }
+
+  function renderDuasList(filterText){
+    var listEl = document.getElementById("duasList");
+    var emptyEl = document.getElementById("duasEmptyState");
+    var q = (filterText || "").trim();
+
+    var filtered = DUAS_DATA.filter(function(dua){
+      if(duasShowFavoritesOnly && !isDuaFavorite(dua.id)) return false;
+      if(q === "") return true;
+      return dua.text.indexOf(q) !== -1 || dua.category.indexOf(q) !== -1 || dua.source.indexOf(q) !== -1;
+    });
+
+    listEl.innerHTML = "";
+    emptyEl.style.display = filtered.length === 0 ? "block" : "none";
+
+    filtered.forEach(function(dua){
+      var card = document.createElement("div");
+      card.className = "dua-card";
+
+      var head = document.createElement("div");
+      head.className = "dua-card-head";
+
+      var cat = document.createElement("span");
+      cat.className = "dua-card-category";
+      cat.textContent = dua.category;
+
+      var favBtn = document.createElement("button");
+      favBtn.type = "button";
+      favBtn.className = "dua-favorite-btn" + (isDuaFavorite(dua.id) ? " active" : "");
+      favBtn.setAttribute("aria-label", "إضافة إلى المفضّلة");
+      favBtn.textContent = isDuaFavorite(dua.id) ? "⭐" : "☆";
+      favBtn.addEventListener("click", function(){
+        toggleDuaFavorite(dua.id);
+        renderDuasList(document.getElementById("duasSearchInput").value);
+      });
+
+      head.appendChild(cat);
+      head.appendChild(favBtn);
+
+      var text = document.createElement("div");
+      text.className = "dua-card-text";
+      text.textContent = dua.text;
+
+      var source = document.createElement("div");
+      source.className = "dua-card-source";
+      source.textContent = dua.source;
+
+      card.appendChild(head);
+      card.appendChild(text);
+      card.appendChild(source);
+      listEl.appendChild(card);
+    });
+  }
+
+  document.getElementById("duasSearchInput").addEventListener("input", function(e){
+    renderDuasList(e.target.value);
+  });
+
+  document.getElementById("duasFavoritesFilterBtn").addEventListener("click", function(){
+    duasShowFavoritesOnly = !duasShowFavoritesOnly;
+    this.setAttribute("aria-pressed", duasShowFavoritesOnly ? "true" : "false");
+    renderDuasList(document.getElementById("duasSearchInput").value);
+  });
+
   /* ================= AZKAR AUDIO PLAYER ================= */
 
   /* تنبيه: رابطا الصباح والمساء تم التحقق منهما فعلياً وهما يعملان
@@ -2818,6 +3251,7 @@
   var azkarSection = document.getElementById("azkarSection");
   var tasbihSection = document.getElementById("tasbihSection");
   var mounajaSection = document.getElementById("mounajaSection");
+  var duasSection = document.getElementById("duasSection");
 
   function switchView(target){
     document.getElementById("view-habits").classList.toggle("hidden", target !== "habits");
@@ -2844,17 +3278,26 @@
     if(sub === "tasbih"){
       azkarSection.style.display = "none";
       mounajaSection.style.display = "none";
+      duasSection.style.display = "none";
       tasbihSection.style.display = "block";
       buildTasbihChips();
       renderTasbih();
     }else if(sub === "mounaja"){
       azkarSection.style.display = "none";
       tasbihSection.style.display = "none";
+      duasSection.style.display = "none";
       mounajaSection.style.display = "block";
+    }else if(sub === "duas"){
+      azkarSection.style.display = "none";
+      tasbihSection.style.display = "none";
+      mounajaSection.style.display = "none";
+      duasSection.style.display = "block";
+      renderDuasList(document.getElementById("duasSearchInput").value);
     }else{
       azkarSection.style.display = "block";
       tasbihSection.style.display = "none";
       mounajaSection.style.display = "none";
+      duasSection.style.display = "none";
       renderDhikrList();
     }
 
@@ -2996,6 +3439,118 @@
     });
   }
 
+  /* ================= FIREBASE CLOUD BRIDGE ================= */
+  //
+  // كل ما هنا اختياري تماماً: إن لم يتحمّل firebase-init.js (لعدم توفر
+  // اتصال، أو خطأ في إعدادات المشروع)، فإن window.SakinaCloud لن يكون
+  // موجوداً، وكل الدوال أدناه تتحقق من ذلك أولاً وتتوقف بصمت — يستمر
+  // التطبيق بالعمل بكامل وظائفه عبر localStorage فقط دون أي كسر.
+
+  function mergeCloudHabitsOnStartup(){
+    if(!window.SakinaCloud || !window.SakinaCloud.isReady()) return;
+    window.SakinaCloud.fetchHabits().then(function(cloudHabits){
+      if(!cloudHabits) return;
+      // إن كانت قائمة العادات المحلية فارغة (أول استخدام على جهاز جديد)،
+      // نستخدم نسخة السحابة كنقطة بداية؛ لا نستبدل بيانات محلية موجودة
+      // فعلياً تجنباً لفقدان تقدّم لم تتم مزامنته بعد من جهاز آخر
+      if(habits.length === 0 && cloudHabits.length > 0){
+        habits = cloudHabits;
+        saveHabits();
+        renderHabits();
+        renderStats();
+        showToast("☁️ تم استرجاع عاداتك من السحابة");
+      }
+    });
+  }
+
+  function mergeCloudQuranProgressOnStartup(){
+    if(!window.SakinaCloud || !window.SakinaCloud.isReady()) return;
+    window.SakinaCloud.fetchQuranProgress().then(function(cloudProgress){
+      if(!cloudProgress) return;
+      var localProgress = loadQuranProgress();
+      // نُفضّل نسخة السحابة فقط إن لم توجد بيانات محلية أصلاً؛ خلاف ذلك
+      // نترك ما هو محفوظ محلياً كما هو (نفس منطق العادات أعلاه)
+      if(!localProgress){
+        lastRead = saveQuranProgress(cloudProgress.surah, cloudProgress.ayah, cloudProgress.page, cloudProgress.scrollTop);
+        currentReadingSurah = cloudProgress.surah;
+        loadSurahForReading(currentReadingSurah, cloudProgress.scrollTop);
+        showToast("☁️ تم استرجاع تقدّم القراءة من السحابة");
+      }
+    });
+  }
+
+  /* ============ عدّاد نية العمرة المجانية العالمي ============ */
+
+  var umrahCounterValueEl = document.getElementById("umrahCounterValue");
+  var umrahCounterBtn = document.getElementById("umrahCounterBtn");
+  var umrahCounterStatusEl = document.getElementById("umrahCounterStatus");
+  var UMRAH_LOCAL_KEY = "sakina_umrah_counter_local_v1";
+  var umrahUnsubscribe = null;
+
+  function loadLocalUmrahCount(){
+    try{
+      var raw = localStorage.getItem(UMRAH_LOCAL_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && typeof parsed.count === "number") ? parsed.count : 0;
+    }catch(e){ return 0; }
+  }
+
+  function saveLocalUmrahCount(count){
+    try{
+      localStorage.setItem(UMRAH_LOCAL_KEY, JSON.stringify({ count: count, updatedAt: Date.now() }));
+    }catch(e){}
+  }
+
+  function initUmrahCounter(){
+    if(!umrahCounterValueEl) return;
+
+    if(!window.SakinaCloud || !window.SakinaCloud.isReady()){
+      // وضع أوفلاين بالكامل: عدّاد محلي فقط على هذا الجهاز، بلا مزامنة عالمية
+      umrahCounterValueEl.textContent = loadLocalUmrahCount().toLocaleString("ar");
+      umrahCounterStatusEl.textContent = "📴 غير متصل بالعدّاد العالمي — يعمل محلياً على جهازك فقط";
+      return;
+    }
+
+    umrahCounterStatusEl.textContent = "🔄 جاري الاتصال بالعدّاد العالمي...";
+
+    umrahUnsubscribe = window.SakinaCloud.listenToUmrahCounter(function(count){
+      if(count === null){
+        umrahCounterValueEl.textContent = loadLocalUmrahCount().toLocaleString("ar");
+        umrahCounterStatusEl.textContent = "📴 تعذر الاتصال بالعدّاد العالمي — يُعرض عدّادك المحلي";
+        return;
+      }
+      umrahCounterValueEl.textContent = count.toLocaleString("ar");
+      umrahCounterStatusEl.textContent = "🌍 عدّاد مباشر لجميع مستخدمي سَكينة حول العالم";
+    });
+  }
+
+  if(umrahCounterBtn){
+    umrahCounterBtn.addEventListener("click", function(){
+      umrahCounterBtn.disabled = true;
+
+      if(window.SakinaCloud && window.SakinaCloud.isReady() && window.SakinaCloud.isOnline()){
+        window.SakinaCloud.incrementUmrahCounter().then(function(newCount){
+          umrahCounterBtn.disabled = false;
+          if(newCount === false){
+            showToast("⚠️ تعذر تسجيل نيتك الآن، حاول لاحقاً");
+            return;
+          }
+          vibrate([20, 20, 20]);
+          showToast("🤲 تقبّل الله نيتك، اللهم بلّغه بيتك الحرام");
+        });
+      }else{
+        // أوفلاين بالكامل: نزيد العدّاد المحلي فقط، ونُعلم المستخدم بوضوح
+        // أن هذه الزيادة لن تنعكس على العدّاد العالمي حتى تعود إلى الاتصال
+        var newLocalCount = loadLocalUmrahCount() + 1;
+        saveLocalUmrahCount(newLocalCount);
+        umrahCounterValueEl.textContent = newLocalCount.toLocaleString("ar");
+        umrahCounterBtn.disabled = false;
+        vibrate([20, 20, 20]);
+        showToast("🤲 تقبّل الله نيتك (سُجّلت محلياً فقط، بانتظار الاتصال بالإنترنت للمزامنة العالمية)");
+      }
+    });
+  }
+
   /* ================= INIT ================= */
 
   document.body.className = currentTheme === "default" ? "" : "theme-" + currentTheme;
@@ -3011,6 +3566,9 @@
   renderDailyHadith();
   buildMounajaGrid();
   renderAzanSettingsUI();
+  initUmrahCounter();
+  mergeCloudHabitsOnStartup();
+  mergeCloudQuranProgressOnStartup();
 
   setInterval(updateHeader, 60000);
 })();

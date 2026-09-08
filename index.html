@@ -117,6 +117,7 @@
         <button class="subtab-pill" data-sub="sleep">🌙 أذكار النوم</button>
         <button class="subtab-pill" data-sub="tasbih">📿 المسبحة</button>
         <button class="subtab-pill" data-sub="mounaja">🤍 مناجاة وسكينة</button>
+        <button class="subtab-pill" data-sub="duas">📗 أدعية ورقية شرعية</button>
       </div>
     </div>
 
@@ -179,6 +180,21 @@
       <p style="font-size:12.5px; color:var(--text-dim); line-height:1.9; margin:-4px 0 16px;">اختر ما يشبه حالك الآن، وستجد آيات وأدعية نبوية تُسكّن قلبك بإذن الله.</p>
       <div class="mounaja-grid" id="mounajaGrid"></div>
     </div>
+
+    <div class="section" id="duasSection" style="display:none;">
+      <div class="section-head">
+        <div class="section-title"><span class="bar"></span>أدعية ورقية شرعية</div>
+      </div>
+
+      <div class="duas-search-row">
+        <input type="text" id="duasSearchInput" class="duas-search-input" placeholder="ابحث عن دعاء أو رقية (مثال: حسد، سفر، مرض)…">
+        <button type="button" class="duas-favorites-filter-btn" id="duasFavoritesFilterBtn" aria-pressed="false">⭐ المفضّلة</button>
+      </div>
+
+      <div id="duasEmptyState" style="display:none; text-align:center; color:var(--text-faint); font-size:12.5px; padding:30px 10px;">لا توجد نتائج مطابقة لبحثك.</div>
+
+      <div class="duas-list" id="duasList"></div>
+    </div>
   </div>
 
   <!-- ===== PRAYER TIMES VIEW ===== -->
@@ -216,6 +232,16 @@
       <div class="prayer-grid" id="prayerGrid"></div>
 
       <button type="button" class="ghost-btn" id="openQiblaBtn" style="width:100%; justify-content:center; margin-top:14px;">🧭 بوصلة القبلة (تعمل بدون إنترنت)</button>
+
+      <div class="settings-card" id="umrahCounterCard" style="margin-top:14px; text-align:center;">
+        <div class="settings-row-text" style="margin-bottom:8px;">
+          <b>🕋 عدّاد نية العمرة المجانية (عالمي)</b>
+          <span>كل ضغطة تُسجَّل مباشرة لجميع مستخدمي سَكينة حول العالم</span>
+        </div>
+        <div id="umrahCounterValue" style="font-size:32px; font-weight:800; color:var(--gold-light); margin:10px 0;">—</div>
+        <button type="button" class="btn btn-confirm" id="umrahCounterBtn" style="width:100%;">🤲 سجّل نيتك للعمرة</button>
+        <div id="umrahCounterStatus" style="font-size:11px; color:var(--text-faint); margin-top:8px;">—</div>
+      </div>
 
       <div class="prayer-settings-line">
         <span id="prayerSettingsSummary">—</span> ·
@@ -349,6 +375,21 @@
         <div id="notifPermissionNote" style="display:none; margin-top:12px; font-size:11px; color:var(--gold-dim); line-height:1.8;"></div>
       </div>
 
+      <div class="settings-card">
+        <div class="settings-row-text" style="margin-bottom:14px;">
+          <b>🌅 تذكير أذكار الصباح والمساء</b>
+          <span>تنبيه واحد يومياً في بداية وقت الفجر لأذكار الصباح، وبداية وقت العصر لأذكار المساء — بشرط تحديد موقعك في قسم المواقيت وبقاء التطبيق مفتوحاً أو يعمل في الخلفية</span>
+        </div>
+        <div class="settings-row" style="padding:10px 0; border-top:1px dashed var(--border-soft);">
+          <div class="settings-row-text"><b>☀️ تذكير أذكار الصباح (وقت الفجر)</b></div>
+          <div class="toggle-switch" id="dhikrNotifToggle-morning" data-dhikr="morning"><div class="knob"></div></div>
+        </div>
+        <div class="settings-row" style="padding:10px 0; border-top:1px dashed var(--border-soft);">
+          <div class="settings-row-text"><b>🌆 تذكير أذكار المساء (وقت العصر)</b></div>
+          <div class="toggle-switch" id="dhikrNotifToggle-evening" data-dhikr="evening"><div class="knob"></div></div>
+        </div>
+      </div>
+
       <div class="settings-card" id="azanSettingsSection">
         <div class="settings-row-text" style="margin-bottom:14px;">
           <b>🔊 إعدادات الأذان</b>
@@ -394,7 +435,9 @@
       <div class="mini-player-name" id="miniPlayerName">—</div>
       <div class="mini-player-reciter" id="miniPlayerReciter">—</div>
     </div>
+    <button class="mini-player-btn" id="miniPlayerPrev" aria-label="السورة السابقة">⏮</button>
     <button class="mini-player-btn play" id="miniPlayerToggle">⏸</button>
+    <button class="mini-player-btn" id="miniPlayerNext" aria-label="السورة التالية">⏭</button>
     <button class="mini-player-btn" id="miniPlayerStop">✕</button>
   </div>
   <div class="mini-player-progress-row">
@@ -591,6 +634,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script type="module" src="firebase-init.js"></script>
 <script src="app.js" defer></script>
 
 </body>
