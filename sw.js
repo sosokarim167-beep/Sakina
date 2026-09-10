@@ -1,57 +1,52 @@
-// ============================================================
-// Service Worker لتطبيق سَكينة
-// هذا الملف يجب أن يكون بجانب ملف index.html (sakina-habits-5.html)
-// في نفس المجلد تماماً على الاستضافة، ويجب أن تكون الاستضافة HTTPS
-// (أو localhost أثناء التطوير)، وإلا فلن يُسجَّل ولن يظهر خيار
-// "تثبيت التطبيق" في متصفح Chrome.
-// ============================================================
+// sw.js - Service Worker المطور لتطبيق سَكينة (الكاش + إشعارات FCM الذكية)
+importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js');
 
 var CACHE_NAME = "sakina-cache-v4";
 
-// عند التثبيت: تفعيل فوري بدون انتظار إغلاق كل التبويبات القديمة
+// --- 1. تهيئة الفايربيس داخل الـ Service Worker ---
+firebase.initializeApp({
+  apiKey: "YOUR_API_KEY", // استبدلها بـ apiKey الخاص بك
+  authDomain: "sakina-app-995bd.firebaseapp.com",
+  projectId: "sakina-app-995bd",
+  storageBucket: "sakina-app-995bd.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+});
+
+const messaging = firebase.messaging();
+
+// --- 2. إدارة الكاش والتثبيت (النسخة الخاصة بك) ---
 self.addEventListener("install", function (event) {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then(function (cache) {
-      // تخزين الصفحة الرئيسية مبدئياً في الكاش لدعم العمل دون اتصال
       return cache.add(self.registration.scope).catch(function () {});
     })
   );
 });
 
-// عند التفعيل: التحكم بجميع الصفحات المفتوحة فوراً، وحذف أي كاش قديم
 self.addEventListener("activate", function (event) {
   event.waitUntil(
-    caches
-      .keys()
-      .then(function (keys) {
-        return Promise.all(
-          keys
-            .filter(function (key) {
-              return key !== CACHE_NAME;
-            })
-            .map(function (key) {
-              return caches.delete(key);
-            })
-        );
-      })
-      .then(function () {
-        return self.clients.claim();
-      })
+    caches.keys().then(function (keys) {
+      return Promise.all(
+        keys.filter(function (key) {
+          return key !== CACHE_NAME;
+        }).map(function (key) {
+          return caches.delete(key);
+        })
+      );
+    }).then(function () {
+      return self.clients.claim();
+    })
   );
 });
 
-// عند كل طلب: استراتيجية "الشبكة أولاً ثم الكاش" مع تحديث الكاش تلقائياً
-// (باستثناء ملفات الصوت الخارجية وطلبات غير GET)
 self.addEventListener("fetch", function (event) {
   var reqUrl = event.request.url;
 
-  if (event.request.method !== "GET") {
-    return;
-  }
-  if (reqUrl.indexOf("mp3quran.net") !== -1 || reqUrl.indexOf(".mp3") !== -1) {
-    return;
-  }
+  if (event.request.method !== "GET") return;
+  if (reqUrl.indexOf("mp3quran.net") !== -1 || reqUrl.indexOf(".mp3") !== -1) return;
 
   event.respondWith(
     caches.match(event.request).then(function (cachedResponse) {
@@ -70,6 +65,51 @@ self.addEventListener("fetch", function (event) {
         });
 
       return cachedResponse || networkFetch;
+    })
+  );
+});
+
+// --- 3. استقبال إشعارات FCM التفاعلية بالخلفية ---
+messaging.onBackgroundMessage(function(payload) {
+  console.log('[sw.js] FCM Payload:', payload);
+
+  const title = payload.notification?.title || 'سَكينة 🕌';
+  const options = {
+    body: payload.notification?.body || 'لديك تنبيه جديد من تطبيق سكينة',
+    icon: '/assets/icons/icon-192.png',
+    badge: '/assets/icons/icon-192.png',
+    vibrate: [200, 100, 200, 100, 200],
+    data: {
+      url: payload.data?.url || '/'
+    },
+    actions: [
+      { action: 'open_app', title: 'فتح التطبيق 📖' },
+      { action: 'close', title: 'تجاهل ✖' }
+    ]
+  };
+
+  self.registration.showNotification(title, options);
+});
+
+// --- 4. التحكم والتوجيه عند الضغط على الإشعار ---
+self.addEventListener('notificationclick', function(event) {
+  event.notification.close();
+
+  if (event.action === 'close') return;
+
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
+      for (var i = 0; i < windowClients.length; i++) {
+        var client = windowClients[i];
+        if (client.url.indexOf(targetUrl) !== -1 && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
     })
   );
 });
