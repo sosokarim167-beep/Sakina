@@ -4,19 +4,19 @@ importScripts('https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-comp
 
 var CACHE_NAME = "sakina-cache-v4";
 
-// --- 1. تهيئة الفايربيس داخل الـ Service Worker ---
+// --- 1. تهيئة الفايربيس بمفاتيح مشروعك الرسمية ---
 firebase.initializeApp({
-  apiKey: "YOUR_API_KEY", // استبدلها بـ apiKey الخاص بك
+  apiKey: "AIzaSy...",
   authDomain: "sakina-app-995bd.firebaseapp.com",
   projectId: "sakina-app-995bd",
   storageBucket: "sakina-app-995bd.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  messagingSenderId: "305141234237",
+  appId: "1:305141234237:web:8c439fa349d4becc98b2c6"
 });
 
 const messaging = firebase.messaging();
 
-// --- 2. إدارة الكاش والتثبيت (النسخة الخاصة بك) ---
+// --- 2. إدارة الكاش والتثبيت ---
 self.addEventListener("install", function (event) {
   self.skipWaiting();
   event.waitUntil(
