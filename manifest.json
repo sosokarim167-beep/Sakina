@@ -1,45 +1,32 @@
 {
   "name": "سَكينة — العادات والأذكار ومواقيت الصلاة والقرآن",
   "short_name": "سَكينة",
-  "description": "تطبيق إسلامي لتتبع العادات، قراءة القرآن، مواقيت الصلاة، الأذكار، وأدوات السكينة الروحية.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "dir": "rtl",
   "lang": "ar",
-  "background_color": "#fcf8ed",
+  "background_color": "#1b4d3e",
   "theme_color": "#1b4d3e",
   "categories": ["lifestyle", "education", "productivity"],
   "icons": [
     {
-      "src": "./icons/icon-32.png",
+      "src": "icons/icon-32.png",
       "sizes": "32x32",
       "type": "image/png"
     },
     {
-      "src": "./icons/icon-192.png",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "./icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "./icons/icon-512.png",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
-    },
-    {
-      "src": "./icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
     }
   ]
 }
