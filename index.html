@@ -258,31 +258,24 @@
       <button class="quran-mode-pill" id="quranModeListenBtn">🎧 استماع</button>
     </div>
 
-    <!-- ---- READING MODE (offline text) ---- -->
+    <!-- ---- READING MODE (Mushaf page images) ---- -->
     <div id="quranReadSection">
 
-      <div class="continue-reading-banner" id="continueReadingBanner">
-        <div class="c-text">
-          <b id="continueReadingSurahName">—</b>
-          <span>تابع من حيث توقفت آخر مرة</span>
+      <div class="mushaf-page-toolbar">
+        <button type="button" class="mushaf-nav-btn" id="mushafPrevBtn" data-i18n="prev_page">السابقة</button>
+        <div class="mushaf-page-indicator">
+          <span data-i18n="page_of">صفحة</span>
+          <input type="number" id="mushafPageInput" class="mushaf-page-input" min="1" max="604" value="1">
+          <span>/ 604</span>
         </div>
-        <button id="continueReadingBtn">متابعة القراءة</button>
+        <button type="button" class="mushaf-nav-btn" id="mushafNextBtn" data-i18n="next_page">التالية</button>
       </div>
 
-      <div class="reading-toolbar">
-        <select class="reading-surah-select" id="readingSurahSelect"></select>
-
-        <div class="reading-controls-row">
-          <div class="font-style-chips" id="fontStyleChips"></div>
-          <div class="font-size-controls">
-            <button class="font-size-btn" id="fontSizeDecreaseBtn">−</button>
-            <span class="font-size-label" id="fontSizeLabel">22</span>
-            <button class="font-size-btn" id="fontSizeIncreaseBtn">+</button>
-          </div>
-        </div>
+      <div class="mushaf-page-frame" id="mushafPageFrame">
+        <img id="mushafPageImage" class="mushaf-page-image" src="" alt="Mushaf page" draggable="false">
+        <div class="mushaf-page-loading" id="mushafPageLoading">⏳</div>
       </div>
 
-      <div class="mushaf-card" id="mushafCard"></div>
     </div>
 
     <!-- ---- LISTEN MODE (online streaming) ---- -->
@@ -390,6 +383,22 @@
         </div>
       </div>
 
+      <div class="settings-card" id="langSettingsSection">
+        <div class="settings-row-text" style="margin-bottom:14px;">
+          <b data-i18n="language">اللغة</b>
+        </div>
+        <div class="lang-switcher-grid" id="langSwitcherGrid"></div>
+      </div>
+
+      <div class="settings-card" id="audioUnlockSection">
+        <div class="settings-row-text" style="margin-bottom:12px;">
+          <b data-i18n="unlock_audio">تفعيل الصوت</b>
+          <span>يمنع متصفحك تشغيل صوت الأذان تلقائياً دون تفاعل منك أولاً (قيود Autoplay) — اضغط الزر مرة واحدة فقط لتفعيل الصوت لهذه الجلسة، وسيعمل الأذان الكامل تلقائياً عند دخول وقت الصلاة بعدها</span>
+        </div>
+        <button type="button" class="btn btn-confirm" id="unlockAudioBtn" style="width:100%;">🔓 تفعيل صوت الأذان الآن</button>
+        <div id="audioUnlockStatus" style="font-size:11px; color:var(--text-faint); margin-top:8px; text-align:center;">—</div>
+      </div>
+
       <div class="settings-card" id="azanSettingsSection">
         <div class="settings-row-text" style="margin-bottom:14px;">
           <b>🔊 إعدادات الأذان</b>
@@ -448,6 +457,7 @@
 </div>
 
 <audio id="quranAudio" preload="none"></audio>
+<audio id="azanFullAudio" preload="none"></audio>
 
 <nav class="bottom-nav">
   <button class="nav-item active" data-nav="habits">
@@ -530,25 +540,6 @@
 </div>
 
 <!-- Tafsir & ayah audio modal -->
-<div class="overlay" id="tafsirOverlay">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <h2 id="tafsirTitle">📖 تفسير الآية</h2>
-
-    <div class="tafsir-ayah-box" id="tafsirAyahBox"></div>
-
-    <button class="geo-btn-full" id="tafsirListenBtn">🔊 استماع للآية بصوت القارئ الحالي</button>
-
-    <div class="tafsir-body" id="tafsirBody">
-      <div class="mushaf-loading"><span class="spin-icon">⏳</span>جارٍ تحميل التفسير الميسر...</div>
-    </div>
-
-    <div class="sheet-actions">
-      <button class="btn btn-confirm" id="tafsirCloseBtn" style="flex:1;">إغلاق</button>
-    </div>
-  </div>
-</div>
-
 <div class="overlay" id="hadithOverlay">
   <div class="sheet">
     <div class="sheet-handle"></div>
@@ -630,10 +621,9 @@
   </div>
 </div>
 
-<audio id="ayahAudio" preload="none"></audio>
-
 <div class="toast" id="toast"></div>
 
+<script src="translations.js"></script>
 <script type="module" src="firebase-init.js"></script>
 <script src="app.js" defer></script>
 
