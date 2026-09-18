@@ -1,6 +1,42 @@
 (function(){
   "use strict";
 
+  /* ================= PWA — SERVICE WORKER (مُسجَّل فوراً في أول السكربت) ================= */
+  //
+  // يُسجَّل Service Worker هنا، في أول سطر فعلي من الملف، حتى يلتقطه Chrome
+  // مبكراً ويعتبر التطبيق قابلاً للتثبيت. الاعتماد فقط على حدث "load" قد
+  // يفشل إن كان هذا الملف نفسه محمّلاً بعد اكتمال تحميل الصفحة فعلياً
+  // (defer/async)، فحدث load لن يُطلَق أبداً بعدها — لذلك نتحقق من حالة
+  // المستند مباشرة، ونضيف مهلة احتياطية إضافية كخط دفاع ثانٍ.
+  (function registerServiceWorkerEarly(){
+    if(!("serviceWorker" in navigator)) return;
+
+    var swRegistered = false;
+
+    function doRegisterSW(){
+      if(swRegistered) return;
+      swRegistered = true;
+      navigator.serviceWorker.register("./sw.js", { scope: "./" }).then(function(registration){
+        console.log("✅ تم تسجيل Service Worker بنجاح:", registration.scope);
+      }).catch(function(err){
+        swRegistered = false;
+        console.warn("⚠️ فشل تسجيل Service Worker — تأكد من رفع ملف sw.js بجانب index.html على استضافة HTTPS:", err);
+      });
+    }
+
+    if(document.readyState === "complete"){
+      doRegisterSW();
+    }else{
+      window.addEventListener("load", doRegisterSW);
+    }
+
+    // خط دفاع احتياطي: إن لم يُسجَّل الـ Service Worker خلال 3 ثوانٍ لأي
+    // سبب (مثلاً حدث load لم يُطلق كما هو متوقع)، نحاول تسجيله يدوياً
+    setTimeout(function(){
+      if(!swRegistered) doRegisterSW();
+    }, 3000);
+  })();
+
   var HABITS_KEY = "sakina_habits_v1";
   var AZKAR_KEY = "sakina_azkar_v1";
   var TASBIH_KEY = "sakina_tasbih_v1";
@@ -758,13 +794,15 @@
       return { key: meta.key, label: meta.label, icon: meta.icon, decimal: decimal, moment: dayStartMs + decimal * 3600000 };
     });
 
-    syncPrayerTimesToNative({
-      fajr: list.filter(function(i){ return i.key === "fajr"; })[0].moment,
-      dhuhr: list.filter(function(i){ return i.key === "dhuhr"; })[0].moment,
-      asr: list.filter(function(i){ return i.key === "asr"; })[0].moment,
-      maghrib: list.filter(function(i){ return i.key === "maghrib"; })[0].moment,
-      isha: list.filter(function(i){ return i.key === "isha"; })[0].moment
-    });
+    if(typeof syncPrayerTimesToNative === "function"){
+      syncPrayerTimesToNative({
+        fajr: list.filter(function(i){ return i.key === "fajr"; })[0].moment,
+        dhuhr: list.filter(function(i){ return i.key === "dhuhr"; })[0].moment,
+        asr: list.filter(function(i){ return i.key === "asr"; })[0].moment,
+        maghrib: list.filter(function(i){ return i.key === "maghrib"; })[0].moment,
+        isha: list.filter(function(i){ return i.key === "isha"; })[0].moment
+      });
+    }
 
     var nowShiftedMs = Date.now() + tz * 3600000;
 
@@ -1312,23 +1350,48 @@
     }catch(e){}
   });
 
-  /* ================= QURAN READER — MUSHAF PAGE IMAGES ================= */
+  /* ================= QURAN READER — MUSHAF PAGE TEXT (AlQuran Cloud API) ================= */
   //
-  // استُبدل نظام القراءة النصية القديم بالكامل (سورة+آية+تمرير) بقارئ
-  // يعرض صوراً لصفحات المصحف (604 صفحة، ترقيم طبعة المدينة القياسي).
-  // التتبع الآن مبسّط بالكامل: رقم الصفحة الحالية (currentPage) فقط،
-  // محلياً في localStorage ومتزامناً مع Firestore كـ { page: currentPage }
-  // — تمت إزالة كل تتبع سابق بالسورة/الآية/موضع التمرير كما طُلب صراحة.
+  // يعرض هذا القارئ نص كل صفحة (604 صفحة، ترقيم طبعة المدينة القياسي) عبر
+  // AlQuran Cloud API، مع تخزين مؤقّت في localStorage لكل صفحة تمّت زيارتها
+  // فتُفتح لاحقاً فوراً وحتى بلا اتصال، ومعالجة أخطاء كاملة (try/catch +
+  // .catch) بحيث لا تبقى الشاشة عالقة على أيقونة تحميل أو اتصال عند فشل
+  // الشبكة — بل تظهر رسالة واضحة وزر «إعادة المحاولة».
   //
-  // مصدر صور الصفحات: يفترض هذا الكود بنية روابط قياسية شائعة الاستخدام
-  // في تطبيقات المصحف مفتوحة المصدر (نمط "page###.png" مرقّم من 001 إلى
-  // 604). استبدل QURAN_PAGE_IMAGE_BASE أدناه بمصدر صورك الفعلي (يمكن
-  // استضافة الصور بنفسك مجلد /quran-pages/ بجانب index.html للعمل أوفلاين
-  // بالكامل بعد أول تحميل، أو استخدام CDN تملك ترخيصاً لاستخدام صوره).
+  // التتبع مبسّط بالكامل: رقم الصفحة الحالية (currentPage) فقط، محلياً في
+  // localStorage ومتزامناً مع Firestore كـ { page: currentPage }.
 
-  var QURAN_PAGE_IMAGE_BASE = "quran-pages/"; // مجلد محلي متوقَّع: quran-pages/page001.png ... page604.png
+  var QURAN_API_PAGE_URL = "https://api.alquran.cloud/v1/page/"; // + {page}/quran-uthmani
   var QURAN_TOTAL_PAGES = 604;
   var QURAN_PAGE_KEY = "sakina_quran_page_v1";
+  var QURAN_PAGE_CACHE_PREFIX = "sakina_quran_page_cache_v1_";
+  var QURAN_FETCH_TIMEOUT_MS = 12000;
+
+  var mushafStylesInjected = false;
+  function injectMushafTextStyles(){
+    if(mushafStylesInjected) return;
+    mushafStylesInjected = true;
+    var styleEl = document.createElement("style");
+    styleEl.textContent =
+      ".mushaf-text-page{width:100%;max-height:70vh;overflow-y:auto;padding:6px 4px;}" +
+      ".mushaf-surah-header{display:flex;align-items:center;justify-content:center;gap:8px;" +
+      "margin:6px 0 14px;padding:10px 8px;border:1px solid #d8cba8;border-radius:8px;" +
+      "background:linear-gradient(135deg,#fffdf6,#f3ead0);color:#5c4a1f;font-family:'Amiri',serif;" +
+      "font-size:20px;font-weight:700;}" +
+      ".mushaf-basmala{text-align:center;color:#5c4a1f;font-family:'Amiri',serif;font-size:19px;" +
+      "margin:2px 0 14px;}" +
+      ".mushaf-ayahs{font-family:'Amiri',serif;font-size:22px;line-height:2.35;color:#26200f;" +
+      "text-align:justify;text-align-last:center;direction:rtl;}" +
+      ".mushaf-ayah-num{display:inline-flex;align-items:center;justify-content:center;" +
+      "width:28px;height:28px;margin:0 3px;border:1.5px solid #b7a25a;border-radius:50%;" +
+      "font-size:13px;color:#8a7b4f;font-family:'Cairo',sans-serif;vertical-align:middle;}" +
+      ".mushaf-error-box{display:flex;flex-direction:column;align-items:center;justify-content:center;" +
+      "gap:12px;padding:30px 16px;text-align:center;color:#8a7b4f;font-family:'Cairo',sans-serif;}" +
+      ".mushaf-retry-btn{background:linear-gradient(135deg, var(--teal), var(--emerald));color:#fff;" +
+      "border:none;border-radius:var(--radius-sm);padding:10px 20px;font-family:'Cairo',sans-serif;" +
+      "font-size:13px;font-weight:700;cursor:pointer;}";
+    document.head.appendChild(styleEl);
+  }
 
   function pad3Page(n){
     var s = String(n);
@@ -1358,32 +1421,163 @@
   }
 
   var currentPage = loadCurrentPage();
+  var mushafFetchToken = 0;
 
-  function renderMushafPage(pageNumber, direction){
+  function getCachedQuranPage(pageNumber){
+    try{
+      var raw = localStorage.getItem(QURAN_PAGE_CACHE_PREFIX + pageNumber);
+      if(!raw) return null;
+      var parsed = JSON.parse(raw);
+      if(parsed && Array.isArray(parsed.ayahs) && parsed.ayahs.length > 0) return parsed.ayahs;
+    }catch(e){}
+    return null;
+  }
+
+  function setCachedQuranPage(pageNumber, ayahs){
+    try{
+      localStorage.setItem(QURAN_PAGE_CACHE_PREFIX + pageNumber, JSON.stringify({ ayahs: ayahs, cachedAt: Date.now() }));
+    }catch(e){
+      // قد يفشل التخزين لامتلاء المساحة؛ لا مشكلة، القراءة ستعمل عبر الشبكة فقط
+    }
+  }
+
+  function fetchWithTimeout(url, timeoutMs){
+    return new Promise(function(resolve, reject){
+      var settled = false;
+      var timer = setTimeout(function(){
+        if(settled) return;
+        settled = true;
+        reject(new Error("timeout"));
+      }, timeoutMs);
+
+      try{
+        fetch(url).then(function(response){
+          if(settled) return;
+          clearTimeout(timer);
+          settled = true;
+          if(!response || !response.ok){
+            reject(new Error("http_" + (response ? response.status : "0")));
+            return;
+          }
+          response.json().then(resolve).catch(function(parseErr){
+            reject(parseErr);
+          });
+        }).catch(function(fetchErr){
+          if(settled) return;
+          clearTimeout(timer);
+          settled = true;
+          reject(fetchErr);
+        });
+      }catch(syncErr){
+        // بعض البيئات القديمة قد لا تملك fetch سليمة؛ نرفض بأمان بدل الانهيار
+        if(!settled){
+          settled = true;
+          clearTimeout(timer);
+          reject(syncErr);
+        }
+      }
+    });
+  }
+
+  function fetchQuranPageText(pageNumber){
+    var cached = getCachedQuranPage(pageNumber);
+    if(cached) return Promise.resolve(cached);
+
+    var url = QURAN_API_PAGE_URL + pageNumber + "/quran-uthmani";
+    return fetchWithTimeout(url, QURAN_FETCH_TIMEOUT_MS).then(function(json){
+      if(!json || json.code !== 200 || !json.data || !Array.isArray(json.data.ayahs) || json.data.ayahs.length === 0){
+        throw new Error("bad_payload");
+      }
+      setCachedQuranPage(pageNumber, json.data.ayahs);
+      return json.data.ayahs;
+    });
+  }
+
+  function buildMushafPageHTML(ayahs){
+    var html = "";
+    var lastSurahNumber = null;
+    for(var i = 0; i < ayahs.length; i++){
+      var ayah = ayahs[i];
+      var surah = ayah.surah || {};
+      if(surah.number !== lastSurahNumber){
+        lastSurahNumber = surah.number;
+        html += "<div class=\"mushaf-surah-header\">سورة " + (surah.name ? surah.name.replace("سورة ", "") : "") + "</div>";
+        if(surah.number !== 1 && surah.number !== 9){
+          html += "<div class=\"mushaf-basmala\">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>";
+        }
+        html += "<div class=\"mushaf-ayahs\">";
+      }
+      var ayahText = (ayah.text || "").replace(/[<>]/g, "");
+      var numberInSurah = ayah.numberInSurah != null ? ayah.numberInSurah : "";
+      html += ayahText + " <span class=\"mushaf-ayah-num\">" + numberInSurah + "</span> ";
+      var isLastOfPage = (i === ayahs.length - 1);
+      var nextSurahChanges = !isLastOfPage && ayahs[i + 1].surah && ayahs[i + 1].surah.number !== surah.number;
+      if(isLastOfPage || nextSurahChanges){
+        html += "</div>";
+      }
+    }
+    return html;
+  }
+
+  function renderMushafErrorState(container, pageNumber, message){
+    container.innerHTML =
+      "<div class=\"mushaf-error-box\">" +
+        "<div style=\"font-size:34px;\">📡</div>" +
+        "<div>" + (message || "تعذّر تحميل صفحة القرآن") + "</div>" +
+        "<button type=\"button\" class=\"mushaf-retry-btn\" id=\"mushafRetryBtn\">إعادة المحاولة</button>" +
+      "</div>";
+    var retryBtn = document.getElementById("mushafRetryBtn");
+    if(retryBtn){
+      retryBtn.addEventListener("click", function(){
+        renderMushafPage(pageNumber);
+      });
+    }
+  }
+
+  function renderMushafPage(pageNumber){
+    injectMushafTextStyles();
+
     var imgEl = document.getElementById("mushafPageImage");
+    if(imgEl) imgEl.style.display = "none";
+
     var loadingEl = document.getElementById("mushafPageLoading");
+    var frameEl = document.getElementById("mushafPageFrame");
     var pageInput = document.getElementById("mushafPageInput");
 
-    loadingEl.classList.remove("hidden");
+    var textContainer = document.getElementById("mushafPageTextContainer");
+    if(!textContainer){
+      textContainer = document.createElement("div");
+      textContainer.id = "mushafPageTextContainer";
+      textContainer.className = "mushaf-text-page";
+      frameEl.appendChild(textContainer);
+    }
+
     pageInput.value = pageNumber;
-
-    var url = QURAN_PAGE_IMAGE_BASE + "page" + pad3Page(pageNumber) + ".png";
-
-    var preload = new Image();
-    preload.onload = function(){
-      imgEl.src = url;
-      loadingEl.classList.add("hidden");
-    };
-    preload.onerror = function(){
-      loadingEl.classList.add("hidden");
-      loadingEl.classList.remove("hidden");
-      loadingEl.textContent = "📡";
-      showToast("⚠️ تعذر تحميل صورة الصفحة " + pageNumber + " — تحقق من مجلد quran-pages أو اتصالك بالإنترنت");
-    };
-    preload.src = url;
-
     document.getElementById("mushafPrevBtn").disabled = (pageNumber <= 1);
     document.getElementById("mushafNextBtn").disabled = (pageNumber >= QURAN_TOTAL_PAGES);
+
+    var hasCache = !!getCachedQuranPage(pageNumber);
+    if(!hasCache){
+      loadingEl.classList.remove("hidden");
+      loadingEl.textContent = "⏳";
+      textContainer.innerHTML = "";
+    }
+
+    var myToken = ++mushafFetchToken;
+
+    fetchQuranPageText(pageNumber).then(function(ayahs){
+      if(myToken !== mushafFetchToken) return; // المستخدم انتقل لصفحة أخرى قبل اكتمال الطلب
+      loadingEl.classList.add("hidden");
+      textContainer.innerHTML = buildMushafPageHTML(ayahs);
+    }).catch(function(err){
+      if(myToken !== mushafFetchToken) return;
+      loadingEl.classList.add("hidden");
+      var msg = (err && err.message === "timeout")
+        ? "⚠️ انتهت مهلة الاتصال أثناء تحميل الصفحة " + pageNumber
+        : "⚠️ تعذّر تحميل الصفحة " + pageNumber + " — تحقق من اتصالك بالإنترنت";
+      renderMushafErrorState(textContainer, pageNumber, msg);
+      showToast(msg);
+    });
   }
 
   function goToPage(pageNumber){
@@ -3144,18 +3338,6 @@
     appleTouchIcon.href = APP_ICON_APPLE_180;
     document.head.appendChild(appleTouchIcon);
   }catch(manifestErr){}
-
-  /* ================= PWA — SERVICE WORKER (external file: sw.js, required for installability) ================= */
-
-  if("serviceWorker" in navigator){
-    window.addEventListener("load", function(){
-      navigator.serviceWorker.register("./sw.js", { scope: "./" }).then(function(registration){
-        console.log("✅ تم تسجيل Service Worker بنجاح:", registration.scope);
-      }).catch(function(err){
-        console.warn("⚠️ فشل تسجيل Service Worker — تأكد من رفع ملف sw.js بجانب index.html على استضافة HTTPS:", err);
-      });
-    });
-  }
 
   /* ================= FIREBASE CLOUD BRIDGE ================= */
   //
