@@ -1356,16 +1356,27 @@
   // AlQuran Cloud API، مع تخزين مؤقّت في localStorage لكل صفحة تمّت زيارتها
   // فتُفتح لاحقاً فوراً وحتى بلا اتصال، ومعالجة أخطاء كاملة (try/catch +
   // .catch) بحيث لا تبقى الشاشة عالقة على أيقونة تحميل أو اتصال عند فشل
-  // الشبكة — بل تظهر رسالة واضحة وزر «إعادة المحاولة».
+  // الشبكة — بل تظهر رسالة واضحة وزر «إعادة المحاولة». كما يدعم اختيار
+  // ترجمة معنى الآيات (تُحدَّث بسلاسة دون تعليق الواجهة)، ويتكيّف ارتفاعه
+  // تلقائياً مع حجم الشاشة بحيث لا تحتاج الصفحة كاملة للتمرير رأسياً.
   //
   // التتبع مبسّط بالكامل: رقم الصفحة الحالية (currentPage) فقط، محلياً في
   // localStorage ومتزامناً مع Firestore كـ { page: currentPage }.
 
-  var QURAN_API_PAGE_URL = "https://api.alquran.cloud/v1/page/"; // + {page}/quran-uthmani
+  var QURAN_API_PAGE_URL = "https://api.alquran.cloud/v1/page/"; // + {page}/{edition}
   var QURAN_TOTAL_PAGES = 604;
   var QURAN_PAGE_KEY = "sakina_quran_page_v1";
   var QURAN_PAGE_CACHE_PREFIX = "sakina_quran_page_cache_v1_";
+  var QURAN_TRANSLATION_KEY = "sakina_quran_translation_v1";
   var QURAN_FETCH_TIMEOUT_MS = 12000;
+
+  var QURAN_TRANSLATIONS = [
+    { key: "none", edition: null, label: "بدون ترجمة (عربي فقط)" },
+    { key: "en", edition: "en.sahih", label: "English — Saheeh International" },
+    { key: "ur", edition: "ur.jalandhry", label: "اردو — جالندھری" },
+    { key: "fr", edition: "fr.hamidullah", label: "Français — Hamidullah" },
+    { key: "id", edition: "id.indonesian", label: "Indonesia — Kemenag" }
+  ];
 
   var mushafStylesInjected = false;
   function injectMushafTextStyles(){
@@ -1373,7 +1384,9 @@
     mushafStylesInjected = true;
     var styleEl = document.createElement("style");
     styleEl.textContent =
-      ".mushaf-text-page{width:100%;max-height:70vh;overflow-y:auto;padding:6px 4px;}" +
+      ".mushaf-text-page{width:100%;overflow-y:auto;padding:6px 4px;-webkit-overflow-scrolling:touch;" +
+      "opacity:0;transition:opacity .22s ease;}" +
+      ".mushaf-text-page.mushaf-fade-visible{opacity:1;}" +
       ".mushaf-surah-header{display:flex;align-items:center;justify-content:center;gap:8px;" +
       "margin:6px 0 14px;padding:10px 8px;border:1px solid #d8cba8;border-radius:8px;" +
       "background:linear-gradient(135deg,#fffdf6,#f3ead0);color:#5c4a1f;font-family:'Amiri',serif;" +
@@ -1385,11 +1398,22 @@
       ".mushaf-ayah-num{display:inline-flex;align-items:center;justify-content:center;" +
       "width:28px;height:28px;margin:0 3px;border:1.5px solid #b7a25a;border-radius:50%;" +
       "font-size:13px;color:#8a7b4f;font-family:'Cairo',sans-serif;vertical-align:middle;}" +
+      ".mushaf-ayah-block{margin:0 0 16px;padding-bottom:14px;border-bottom:1px dashed #d8cba8;}" +
+      ".mushaf-ayah-block:last-child{border-bottom:none;}" +
+      ".mushaf-ayah-block .mushaf-ayahs{display:inline;}" +
+      ".mushaf-ayah-translation{direction:ltr;text-align:left;font-family:'Cairo',sans-serif;" +
+      "font-size:14.5px;line-height:1.7;color:#6b5d38;margin-top:8px;}" +
+      ".mushaf-ayah-translation[dir=\"rtl\"]{direction:rtl;text-align:right;font-family:'Cairo',sans-serif;}" +
       ".mushaf-error-box{display:flex;flex-direction:column;align-items:center;justify-content:center;" +
       "gap:12px;padding:30px 16px;text-align:center;color:#8a7b4f;font-family:'Cairo',sans-serif;}" +
       ".mushaf-retry-btn{background:linear-gradient(135deg, var(--teal), var(--emerald));color:#fff;" +
       "border:none;border-radius:var(--radius-sm);padding:10px 20px;font-family:'Cairo',sans-serif;" +
-      "font-size:13px;font-weight:700;cursor:pointer;}";
+      "font-size:13px;font-weight:700;cursor:pointer;}" +
+      ".mushaf-translation-bar{display:flex;align-items:center;justify-content:center;gap:8px;" +
+      "margin:0 16px 10px;}" +
+      ".mushaf-translation-select{flex:1;max-width:320px;background:var(--surface-2);" +
+      "border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;" +
+      "color:var(--text);font-family:'Cairo',sans-serif;font-size:13px;outline:none;}";
     document.head.appendChild(styleEl);
   }
 
@@ -1420,12 +1444,32 @@
     }
   }
 
+  function loadSelectedTranslationKey(){
+    try{
+      var saved = localStorage.getItem(QURAN_TRANSLATION_KEY);
+      if(saved && QURAN_TRANSLATIONS.some(function(t){ return t.key === saved; })) return saved;
+    }catch(e){}
+    return "none";
+  }
+
+  function saveSelectedTranslationKey(key){
+    try{ localStorage.setItem(QURAN_TRANSLATION_KEY, key); }catch(e){}
+  }
+
+  function getTranslationConfig(key){
+    for(var i = 0; i < QURAN_TRANSLATIONS.length; i++){
+      if(QURAN_TRANSLATIONS[i].key === key) return QURAN_TRANSLATIONS[i];
+    }
+    return QURAN_TRANSLATIONS[0];
+  }
+
   var currentPage = loadCurrentPage();
+  var currentTranslationKey = loadSelectedTranslationKey();
   var mushafFetchToken = 0;
 
-  function getCachedQuranPage(pageNumber){
+  function getCachedQuranPage(cacheKey){
     try{
-      var raw = localStorage.getItem(QURAN_PAGE_CACHE_PREFIX + pageNumber);
+      var raw = localStorage.getItem(QURAN_PAGE_CACHE_PREFIX + cacheKey);
       if(!raw) return null;
       var parsed = JSON.parse(raw);
       if(parsed && Array.isArray(parsed.ayahs) && parsed.ayahs.length > 0) return parsed.ayahs;
@@ -1433,9 +1477,9 @@
     return null;
   }
 
-  function setCachedQuranPage(pageNumber, ayahs){
+  function setCachedQuranPage(cacheKey, ayahs){
     try{
-      localStorage.setItem(QURAN_PAGE_CACHE_PREFIX + pageNumber, JSON.stringify({ ayahs: ayahs, cachedAt: Date.now() }));
+      localStorage.setItem(QURAN_PAGE_CACHE_PREFIX + cacheKey, JSON.stringify({ ayahs: ayahs, cachedAt: Date.now() }));
     }catch(e){
       // قد يفشل التخزين لامتلاء المساحة؛ لا مشكلة، القراءة ستعمل عبر الشبكة فقط
     }
@@ -1479,44 +1523,84 @@
     });
   }
 
-  function fetchQuranPageText(pageNumber){
-    var cached = getCachedQuranPage(pageNumber);
+  function fetchQuranEdition(pageNumber, edition, cacheKey){
+    var cached = getCachedQuranPage(cacheKey);
     if(cached) return Promise.resolve(cached);
 
-    var url = QURAN_API_PAGE_URL + pageNumber + "/quran-uthmani";
+    var url = QURAN_API_PAGE_URL + pageNumber + "/" + edition;
     return fetchWithTimeout(url, QURAN_FETCH_TIMEOUT_MS).then(function(json){
       if(!json || json.code !== 200 || !json.data || !Array.isArray(json.data.ayahs) || json.data.ayahs.length === 0){
         throw new Error("bad_payload");
       }
-      setCachedQuranPage(pageNumber, json.data.ayahs);
+      setCachedQuranPage(cacheKey, json.data.ayahs);
       return json.data.ayahs;
     });
   }
 
-  function buildMushafPageHTML(ayahs){
-    var html = "";
-    var lastSurahNumber = null;
-    for(var i = 0; i < ayahs.length; i++){
-      var ayah = ayahs[i];
-      var surah = ayah.surah || {};
-      if(surah.number !== lastSurahNumber){
-        lastSurahNumber = surah.number;
-        html += "<div class=\"mushaf-surah-header\">سورة " + (surah.name ? surah.name.replace("سورة ", "") : "") + "</div>";
-        if(surah.number !== 1 && surah.number !== 9){
-          html += "<div class=\"mushaf-basmala\">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>";
+  function fetchQuranPageText(pageNumber){
+    return fetchQuranEdition(pageNumber, "quran-uthmani", String(pageNumber) + "_ar");
+  }
+
+  function fetchQuranTranslationText(pageNumber, translationConfig){
+    if(!translationConfig || !translationConfig.edition) return Promise.resolve(null);
+    return fetchQuranEdition(pageNumber, translationConfig.edition, String(pageNumber) + "_" + translationConfig.key);
+  }
+
+  function buildMushafPageHTML(ayahs, translationAyahs){
+    if(!translationAyahs){
+      // بلا ترجمة: نص متصل بأسلوب المصحف التقليدي (فقرة واحدة مُبَرّرة لكل سورة)
+      var html = "";
+      var lastSurahNumber = null;
+      for(var i = 0; i < ayahs.length; i++){
+        var ayah = ayahs[i];
+        var surah = ayah.surah || {};
+        if(surah.number !== lastSurahNumber){
+          lastSurahNumber = surah.number;
+          html += "<div class=\"mushaf-surah-header\">سورة " + (surah.name ? surah.name.replace("سورة ", "") : "") + "</div>";
+          if(surah.number !== 1 && surah.number !== 9){
+            html += "<div class=\"mushaf-basmala\">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>";
+          }
+          html += "<div class=\"mushaf-ayahs\">";
         }
-        html += "<div class=\"mushaf-ayahs\">";
+        var ayahText = (ayah.text || "").replace(/[<>]/g, "");
+        var numberInSurah = ayah.numberInSurah != null ? ayah.numberInSurah : "";
+        html += ayahText + " <span class=\"mushaf-ayah-num\">" + numberInSurah + "</span> ";
+        var isLastOfPage = (i === ayahs.length - 1);
+        var nextSurahChanges = !isLastOfPage && ayahs[i + 1].surah && ayahs[i + 1].surah.number !== surah.number;
+        if(isLastOfPage || nextSurahChanges){
+          html += "</div>";
+        }
       }
-      var ayahText = (ayah.text || "").replace(/[<>]/g, "");
-      var numberInSurah = ayah.numberInSurah != null ? ayah.numberInSurah : "";
-      html += ayahText + " <span class=\"mushaf-ayah-num\">" + numberInSurah + "</span> ";
-      var isLastOfPage = (i === ayahs.length - 1);
-      var nextSurahChanges = !isLastOfPage && ayahs[i + 1].surah && ayahs[i + 1].surah.number !== surah.number;
-      if(isLastOfPage || nextSurahChanges){
-        html += "</div>";
-      }
+      return html;
     }
-    return html;
+
+    // مع ترجمة: كل آية في كتلة مستقلة (نص عربي ثم الترجمة أسفله) لسهولة المقارنة
+    var translationByNumber = {};
+    translationAyahs.forEach(function(t){ translationByNumber[t.number] = t.text; });
+
+    var out = "";
+    var lastSurah = null;
+    for(var j = 0; j < ayahs.length; j++){
+      var a = ayahs[j];
+      var sur = a.surah || {};
+      if(sur.number !== lastSurah){
+        lastSurah = sur.number;
+        out += "<div class=\"mushaf-surah-header\">سورة " + (sur.name ? sur.name.replace("سورة ", "") : "") + "</div>";
+        if(sur.number !== 1 && sur.number !== 9){
+          out += "<div class=\"mushaf-basmala\">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>";
+        }
+      }
+      var text = (a.text || "").replace(/[<>]/g, "");
+      var numInSurah = a.numberInSurah != null ? a.numberInSurah : "";
+      var translated = translationByNumber[a.number];
+      out += "<div class=\"mushaf-ayah-block\">";
+      out += "<div class=\"mushaf-ayahs\">" + text + " <span class=\"mushaf-ayah-num\">" + numInSurah + "</span></div>";
+      if(translated){
+        out += "<div class=\"mushaf-ayah-translation\">" + String(translated).replace(/[<>]/g, "") + "</div>";
+      }
+      out += "</div>";
+    }
+    return out;
   }
 
   function renderMushafErrorState(container, pageNumber, message){
@@ -1534,8 +1618,71 @@
     }
   }
 
+  function ensureTranslationSelector(){
+    if(document.getElementById("mushafTranslationSelect")) return;
+
+    var toolbar = document.querySelector(".mushaf-page-toolbar");
+    if(!toolbar || !toolbar.parentNode) return;
+
+    var bar = document.createElement("div");
+    bar.className = "mushaf-translation-bar";
+
+    var select = document.createElement("select");
+    select.id = "mushafTranslationSelect";
+    select.className = "mushaf-translation-select";
+    QURAN_TRANSLATIONS.forEach(function(t){
+      var opt = document.createElement("option");
+      opt.value = t.key;
+      opt.textContent = t.label;
+      if(t.key === currentTranslationKey) opt.selected = true;
+      select.appendChild(opt);
+    });
+
+    select.addEventListener("change", function(){
+      currentTranslationKey = select.value;
+      saveSelectedTranslationKey(currentTranslationKey);
+      renderMushafPage(currentPage); // تحديث سلس للصفحة الحالية بالترجمة الجديدة
+    });
+
+    bar.appendChild(select);
+    toolbar.parentNode.insertBefore(bar, toolbar.nextSibling);
+  }
+
+  function fitMushafFrameToViewport(){
+    var frameEl = document.getElementById("mushafPageFrame");
+    var textContainer = document.getElementById("mushafPageTextContainer");
+    var quranView = document.getElementById("view-quran");
+    if(!frameEl || !quranView || quranView.classList.contains("hidden")) return;
+
+    var rect = frameEl.getBoundingClientRect();
+    if(rect.top === 0 && rect.height === 0) return; // العنصر غير مرئي بعد؛ لا فائدة من الحساب الآن
+
+    var bottomNavEl = document.querySelector(".bottom-nav");
+    var bottomNavHeight = bottomNavEl ? bottomNavEl.getBoundingClientRect().height : 64;
+    var SAFE_MARGIN = 14;
+
+    var available = Math.floor(window.innerHeight - rect.top - bottomNavHeight - SAFE_MARGIN);
+    if(available < 260) available = 260;
+
+    frameEl.style.maxHeight = available + "px";
+    frameEl.style.overflow = "hidden";
+    if(textContainer){
+      textContainer.style.maxHeight = (available - 20) + "px";
+    }
+  }
+
+  var fitMushafResizeTimer = null;
+  window.addEventListener("resize", function(){
+    clearTimeout(fitMushafResizeTimer);
+    fitMushafResizeTimer = setTimeout(fitMushafFrameToViewport, 120);
+  });
+  window.addEventListener("orientationchange", function(){
+    setTimeout(fitMushafFrameToViewport, 250);
+  });
+
   function renderMushafPage(pageNumber){
     injectMushafTextStyles();
+    ensureTranslationSelector();
 
     var imgEl = document.getElementById("mushafPageImage");
     if(imgEl) imgEl.style.display = "none";
@@ -1556,19 +1703,43 @@
     document.getElementById("mushafPrevBtn").disabled = (pageNumber <= 1);
     document.getElementById("mushafNextBtn").disabled = (pageNumber >= QURAN_TOTAL_PAGES);
 
-    var hasCache = !!getCachedQuranPage(pageNumber);
-    if(!hasCache){
+    var translationConfig = getTranslationConfig(currentTranslationKey);
+    var hasArabicCache = !!getCachedQuranPage(String(pageNumber) + "_ar");
+    var hasTranslationCache = !translationConfig.edition || !!getCachedQuranPage(String(pageNumber) + "_" + translationConfig.key);
+
+    textContainer.classList.remove("mushaf-fade-visible");
+
+    if(!hasArabicCache || !hasTranslationCache){
       loadingEl.classList.remove("hidden");
       loadingEl.textContent = "⏳";
-      textContainer.innerHTML = "";
     }
 
     var myToken = ++mushafFetchToken;
 
-    fetchQuranPageText(pageNumber).then(function(ayahs){
-      if(myToken !== mushafFetchToken) return; // المستخدم انتقل لصفحة أخرى قبل اكتمال الطلب
+    var arabicPromise = fetchQuranPageText(pageNumber);
+    var translationPromise = fetchQuranTranslationText(pageNumber, translationConfig).catch(function(){
+      return "TRANSLATION_FAILED"; // لا نُسقط الصفحة كاملة إن فشلت الترجمة فقط؛ نعرض العربي ونُنبّه المستخدم
+    });
+
+    Promise.all([arabicPromise, translationPromise]).then(function(results){
+      if(myToken !== mushafFetchToken) return; // المستخدم انتقل لصفحة أخرى أو بدّل الترجمة قبل الاكتمال
+      var ayahs = results[0];
+      var translationResult = results[1];
+
       loadingEl.classList.add("hidden");
-      textContainer.innerHTML = buildMushafPageHTML(ayahs);
+
+      if(translationResult === "TRANSLATION_FAILED"){
+        textContainer.innerHTML = buildMushafPageHTML(ayahs, null);
+        showToast("⚠️ تعذّر تحميل الترجمة — تُعرض الصفحة بالعربية فقط");
+      }else{
+        textContainer.innerHTML = buildMushafPageHTML(ayahs, translationResult);
+      }
+
+      requestAnimationFrame(function(){
+        textContainer.classList.add("mushaf-fade-visible"); // ظهور سلس للنص المحدَّث
+      });
+
+      fitMushafFrameToViewport();
     }).catch(function(err){
       if(myToken !== mushafFetchToken) return;
       loadingEl.classList.add("hidden");
@@ -1576,6 +1747,7 @@
         ? "⚠️ انتهت مهلة الاتصال أثناء تحميل الصفحة " + pageNumber
         : "⚠️ تعذّر تحميل الصفحة " + pageNumber + " — تحقق من اتصالك بالإنترنت";
       renderMushafErrorState(textContainer, pageNumber, msg);
+      textContainer.classList.add("mushaf-fade-visible");
       showToast(msg);
     });
   }
@@ -1625,7 +1797,44 @@
     }, { passive: true });
   })();
 
+  /* ================= QURAN READER — READ / LISTEN MODE SWITCH ================= */
+  //
+  // إصلاح زر «🎧 استماع»: لم يكن مربوطاً بأي مستمع نقر سابقاً، فلا شيء
+  // كان يحدث عند الضغط عليه. الآن يُبدّل بشكل صريح بين قسم القراءة
+  // النصية (quranReadSection) وقسم الاستماع (quranListenSection)، ويُحدّث
+  // حالة "active" على كلا الزرين.
+
+  function switchQuranMode(mode){
+    var readBtn = document.getElementById("quranModeReadBtn");
+    var listenBtn = document.getElementById("quranModeListenBtn");
+    var readSection = document.getElementById("quranReadSection");
+    var listenSection = document.getElementById("quranListenSection");
+    if(!readBtn || !listenBtn || !readSection || !listenSection) return;
+
+    var isRead = (mode === "read");
+    readBtn.classList.toggle("active", isRead);
+    listenBtn.classList.toggle("active", !isRead);
+    readSection.style.display = isRead ? "" : "none";
+    listenSection.style.display = isRead ? "none" : "";
+
+    if(isRead){
+      setTimeout(fitMushafFrameToViewport, 30);
+    }
+  }
+
+  function initQuranModeSwitch(){
+    var readBtn = document.getElementById("quranModeReadBtn");
+    var listenBtn = document.getElementById("quranModeListenBtn");
+    if(readBtn){
+      readBtn.addEventListener("click", function(){ switchQuranMode("read"); });
+    }
+    if(listenBtn){
+      listenBtn.addEventListener("click", function(){ switchQuranMode("listen"); });
+    }
+  }
+
   function initReadingMode(){
+    initQuranModeSwitch();
     renderMushafPage(currentPage);
   }
 
@@ -3180,6 +3389,9 @@
     }
     if(target === "more"){
       renderAzanSettingsUI();
+    }
+    if(target === "quran"){
+      setTimeout(fitMushafFrameToViewport, 60);
     }
   }
 
