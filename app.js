@@ -1378,6 +1378,30 @@
     { key: "id", edition: "id.indonesian", label: "Indonesia — Kemenag" }
   ];
 
+  /* ---- إعدادات وضع «آية بآية» التفاعلي: فهرس السور، التفسير، وتلاوة الآية ---- */
+  var QURAN_API_SURAH_URL = "https://api.alquran.cloud/v1/surah/"; // + {number}/quran-uthmani
+  var QURAN_API_AYAH_URL = "https://api.alquran.cloud/v1/ayah/"; // + {globalNumber}/{edition}
+  var QURAN_SURAH_PAGE_MAP_KEY = "sakina_surah_start_page_map_v1";
+  var QURAN_TAFSIR_EDITION = "ar.muyassar"; // التفسير الميسر
+  var QURAN_TAFSIR_CACHE_PREFIX = "sakina_quran_tafsir_v1_";
+  var QURAN_AYAH_AUDIO_CACHE_PREFIX = "sakina_quran_ayah_audio_v1_";
+
+  // مطابقة كل قارئ من قائمة الاستماع الحالية (RECITERS) بمعرّف إصدار صوتي
+  // مناظر على AlQuran Cloud CDN (يُستخدم لتشغيل آية واحدة فقط)؛ القرّاء غير
+  // المُدرَجين هنا يقعون تلقائياً على تلاوة العفاسي كخيار افتراضي آمن
+  var AYAH_AUDIO_EDITIONS = {
+    afs: "ar.alafasy",
+    husary: "ar.husary",
+    basit: "ar.abdulbasitmurattal",
+    minshawi: "ar.minshawi",
+    shur: "ar.saoodshuraym"
+  };
+  var AYAH_AUDIO_DEFAULT_EDITION = "ar.alafasy";
+
+  function getAyahAudioEdition(reciterKey){
+    return AYAH_AUDIO_EDITIONS[reciterKey] || AYAH_AUDIO_DEFAULT_EDITION;
+  }
+
   var mushafStylesInjected = false;
   function injectMushafTextStyles(){
     if(mushafStylesInjected) return;
@@ -1413,7 +1437,57 @@
       "margin:0 16px 10px;}" +
       ".mushaf-translation-select{flex:1;max-width:320px;background:var(--surface-2);" +
       "border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;" +
-      "color:var(--text);font-family:'Cairo',sans-serif;font-size:13px;outline:none;}";
+      "color:var(--text);font-family:'Cairo',sans-serif;font-size:13px;outline:none;}" +
+      ".mushaf-surah-btn{flex-shrink:0;background:linear-gradient(135deg, var(--teal), var(--emerald));" +
+      "color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;" +
+      "font-family:'Cairo',sans-serif;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;}" +
+      ".mushaf-ayah-unit{cursor:pointer;border-radius:6px;transition:background-color .15s ease;}" +
+      ".mushaf-ayahs .mushaf-ayah-unit{padding:2px 1px;}" +
+      ".mushaf-ayah-unit:active,.mushaf-ayah-unit.mushaf-ayah-active{background-color:rgba(20,184,166,.18);}" +
+      ".mushaf-ayah-block.mushaf-ayah-unit{padding:4px 6px;}" +
+      /* ---- نافذة فهرس السور (بحث + قائمة) ---- */
+      ".sakina-modal-overlay{position:fixed;inset:0;background:rgba(4,8,16,.72);z-index:200;" +
+      "display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;" +
+      "transition:opacity .2s ease;}" +
+      ".sakina-modal-overlay.open{opacity:1;pointer-events:auto;}" +
+      ".sakina-modal-sheet{width:100%;max-width:480px;background:var(--surface-1,#0e1626);" +
+      "border-radius:18px 18px 0 0;max-height:82vh;display:flex;flex-direction:column;" +
+      "transform:translateY(16px);transition:transform .2s ease;" +
+      "box-shadow:0 -12px 40px -10px rgba(0,0,0,.6);padding-bottom:env(safe-area-inset-bottom);}" +
+      ".sakina-modal-overlay.open .sakina-modal-sheet{transform:translateY(0);}" +
+      ".sakina-modal-head{display:flex;align-items:center;justify-content:space-between;" +
+      "padding:16px 16px 8px;}" +
+      ".sakina-modal-title{font-family:'Cairo',sans-serif;font-weight:800;font-size:16px;color:var(--text);}" +
+      ".sakina-modal-close{background:none;border:none;color:var(--text-dim);font-size:20px;" +
+      "cursor:pointer;line-height:1;padding:4px 8px;}" +
+      ".sakina-surah-search-input{margin:0 16px 10px;padding:10px 12px;border-radius:var(--radius-sm);" +
+      "border:1px solid var(--border);background:var(--surface-2);color:var(--text);" +
+      "font-family:'Cairo',sans-serif;font-size:14px;outline:none;}" +
+      ".sakina-surah-list{overflow-y:auto;padding:0 10px 14px;}" +
+      ".sakina-surah-row{display:flex;align-items:center;gap:10px;padding:11px 10px;" +
+      "border-radius:10px;cursor:pointer;font-family:'Cairo',sans-serif;}" +
+      ".sakina-surah-row:active{background:rgba(255,255,255,.06);}" +
+      ".sakina-surah-row-num{flex-shrink:0;width:30px;height:30px;border-radius:50%;" +
+      "border:1.5px solid var(--gold,#d4af37);display:flex;align-items:center;justify-content:center;" +
+      "font-size:12px;color:var(--gold,#d4af37);}" +
+      ".sakina-surah-row-name{flex:1;color:var(--text);font-size:15px;font-weight:700;" +
+      "font-family:'Amiri',serif;}" +
+      ".sakina-surah-row-meta{color:var(--text-dim);font-size:11px;flex-shrink:0;}" +
+      /* ---- نافذة إجراءات الآية (تفسير / استماع) ---- */
+      ".ayah-action-title{font-family:'Amiri',serif;font-size:16px;color:var(--gold,#d4af37);}" +
+      ".ayah-action-arabic{margin:0 16px 14px;padding:12px;border-radius:10px;" +
+      "background:rgba(255,255,255,.04);color:var(--text);font-family:'Amiri',serif;font-size:19px;" +
+      "line-height:1.9;text-align:center;direction:rtl;}" +
+      ".ayah-action-buttons{display:flex;gap:10px;margin:0 16px 12px;}" +
+      ".ayah-action-btn{flex:1;background:var(--surface-2);border:1px solid var(--border);" +
+      "border-radius:var(--radius-sm);padding:12px 8px;color:var(--text);font-family:'Cairo',sans-serif;" +
+      "font-size:13.5px;font-weight:700;cursor:pointer;display:flex;flex-direction:column;" +
+      "align-items:center;gap:4px;}" +
+      ".ayah-action-btn.active{background:linear-gradient(135deg, var(--teal), var(--emerald));" +
+      "color:#fff;border-color:transparent;}" +
+      ".ayah-action-result{margin:0 16px 18px;min-height:40px;font-family:'Cairo',sans-serif;" +
+      "font-size:14px;line-height:1.9;color:var(--text-dim);}" +
+      ".ayah-action-tafsir-text{color:var(--text);}";
     document.head.appendChild(styleEl);
   }
 
@@ -1546,9 +1620,18 @@
     return fetchQuranEdition(pageNumber, translationConfig.edition, String(pageNumber) + "_" + translationConfig.key);
   }
 
+  function ayahUnitAttrs(ayah){
+    var surah = ayah.surah || {};
+    var surahName = surah.name ? surah.name.replace("سورة ", "") : "";
+    return "data-global=\"" + ayah.number + "\" data-surah=\"" + surah.number + "\" " +
+      "data-numinsurah=\"" + (ayah.numberInSurah != null ? ayah.numberInSurah : "") + "\" " +
+      "data-surahname=\"" + surahName.replace(/"/g, "") + "\"";
+  }
+
   function buildMushafPageHTML(ayahs, translationAyahs){
     if(!translationAyahs){
-      // بلا ترجمة: نص متصل بأسلوب المصحف التقليدي (فقرة واحدة مُبَرّرة لكل سورة)
+      // بلا ترجمة: نص متصل بأسلوب المصحف التقليدي (فقرة واحدة مُبَرّرة لكل سورة)،
+      // مع كون كل آية وحدة قابلة للنقر (mushaf-ayah-unit) لفتح قائمة إجراءاتها
       var html = "";
       var lastSurahNumber = null;
       for(var i = 0; i < ayahs.length; i++){
@@ -1564,7 +1647,8 @@
         }
         var ayahText = (ayah.text || "").replace(/[<>]/g, "");
         var numberInSurah = ayah.numberInSurah != null ? ayah.numberInSurah : "";
-        html += ayahText + " <span class=\"mushaf-ayah-num\">" + numberInSurah + "</span> ";
+        html += "<span class=\"mushaf-ayah-unit\" " + ayahUnitAttrs(ayah) + ">" +
+          ayahText + " <span class=\"mushaf-ayah-num\">" + numberInSurah + "</span></span> ";
         var isLastOfPage = (i === ayahs.length - 1);
         var nextSurahChanges = !isLastOfPage && ayahs[i + 1].surah && ayahs[i + 1].surah.number !== surah.number;
         if(isLastOfPage || nextSurahChanges){
@@ -1574,7 +1658,7 @@
       return html;
     }
 
-    // مع ترجمة: كل آية في كتلة مستقلة (نص عربي ثم الترجمة أسفله) لسهولة المقارنة
+    // مع ترجمة: كل آية في كتلة مستقلة قابلة للنقر (نص عربي ثم الترجمة أسفله)
     var translationByNumber = {};
     translationAyahs.forEach(function(t){ translationByNumber[t.number] = t.text; });
 
@@ -1593,7 +1677,7 @@
       var text = (a.text || "").replace(/[<>]/g, "");
       var numInSurah = a.numberInSurah != null ? a.numberInSurah : "";
       var translated = translationByNumber[a.number];
-      out += "<div class=\"mushaf-ayah-block\">";
+      out += "<div class=\"mushaf-ayah-block mushaf-ayah-unit\" " + ayahUnitAttrs(a) + ">";
       out += "<div class=\"mushaf-ayahs\">" + text + " <span class=\"mushaf-ayah-num\">" + numInSurah + "</span></div>";
       if(translated){
         out += "<div class=\"mushaf-ayah-translation\">" + String(translated).replace(/[<>]/g, "") + "</div>";
@@ -1648,6 +1732,302 @@
     toolbar.parentNode.insertBefore(bar, toolbar.nextSibling);
   }
 
+  /* ---- ١) فهرس السور: بحث واختيار أي سورة بدل التنقّل بالصفحات فقط ---- */
+
+  function loadSurahPageMap(){
+    try{
+      var raw = localStorage.getItem(QURAN_SURAH_PAGE_MAP_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    }catch(e){ return {}; }
+  }
+
+  function saveSurahStartPage(surahNumber, page){
+    try{
+      var map = loadSurahPageMap();
+      map[surahNumber] = page;
+      localStorage.setItem(QURAN_SURAH_PAGE_MAP_KEY, JSON.stringify(map));
+    }catch(e){}
+  }
+
+  function resolveSurahStartPage(surahNumber){
+    var map = loadSurahPageMap();
+    if(map[surahNumber]) return Promise.resolve(map[surahNumber]);
+
+    var url = QURAN_API_SURAH_URL + surahNumber + "/quran-uthmani";
+    return fetchWithTimeout(url, QURAN_FETCH_TIMEOUT_MS).then(function(json){
+      if(!json || json.code !== 200 || !json.data || !Array.isArray(json.data.ayahs) || json.data.ayahs.length === 0){
+        throw new Error("bad_payload");
+      }
+      var page = json.data.ayahs[0].page;
+      if(typeof page !== "number") throw new Error("no_page");
+      saveSurahStartPage(surahNumber, page);
+      return page;
+    });
+  }
+
+  function ensureSurahSearchUI(){
+    if(document.getElementById("surahIndexOverlay")) return;
+
+    var toolbar = document.querySelector(".mushaf-page-toolbar");
+    if(!toolbar) return;
+
+    // زر فتح الفهرس: يُضاف داخل شريط أدوات القراءة نفسه
+    var openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.id = "openSurahIndexBtn";
+    openBtn.className = "mushaf-surah-btn";
+    openBtn.textContent = "📑 السور";
+    toolbar.insertBefore(openBtn, toolbar.firstChild);
+
+    var overlay = document.createElement("div");
+    overlay.id = "surahIndexOverlay";
+    overlay.className = "sakina-modal-overlay";
+    overlay.innerHTML =
+      "<div class=\"sakina-modal-sheet\">" +
+        "<div class=\"sakina-modal-head\">" +
+          "<span class=\"sakina-modal-title\">📑 فهرس السور (١١٤ سورة)</span>" +
+          "<button type=\"button\" class=\"sakina-modal-close\" id=\"surahIndexCloseBtn\">✕</button>" +
+        "</div>" +
+        "<input type=\"text\" id=\"surahIndexSearchInput\" class=\"sakina-surah-search-input\" " +
+          "placeholder=\"ابحث باسم السورة أو رقمها...\">" +
+        "<div class=\"sakina-surah-list\" id=\"surahIndexList\"></div>" +
+      "</div>";
+    document.body.appendChild(overlay);
+
+    var listEl = document.getElementById("surahIndexList");
+
+    function renderSurahIndexList(filterText){
+      var q = (filterText || "").trim().toLowerCase();
+      listEl.innerHTML = "";
+      SURAHS.forEach(function(s){
+        var num = s[0], name = s[1], ayahCount = s[2], place = s[3];
+        if(q && name.indexOf(q) === -1 && String(num).indexOf(q) === -1) return;
+
+        var row = document.createElement("div");
+        row.className = "sakina-surah-row";
+        row.innerHTML =
+          "<div class=\"sakina-surah-row-num\">" + num + "</div>" +
+          "<div class=\"sakina-surah-row-name\">" + name + "</div>" +
+          "<div class=\"sakina-surah-row-meta\">" + ayahCount + " آية · " + place + "</div>";
+        row.addEventListener("click", function(){
+          row.style.opacity = "0.5"; // مؤشر انتظار بسيط أثناء تحديد رقم الصفحة
+          resolveSurahStartPage(num).then(function(page){
+            closeSurahIndex();
+            goToPage(page);
+          }).catch(function(){
+            row.style.opacity = "1";
+            showToast("⚠️ تعذّر فتح سورة " + name + " الآن — تحقق من الاتصال");
+          });
+        });
+        listEl.appendChild(row);
+      });
+    }
+
+    renderSurahIndexList("");
+
+    document.getElementById("surahIndexSearchInput").addEventListener("input", function(e){
+      renderSurahIndexList(e.target.value);
+    });
+
+    openBtn.addEventListener("click", function(){
+      overlay.classList.add("open");
+      document.getElementById("surahIndexSearchInput").value = "";
+      renderSurahIndexList("");
+    });
+
+    function closeSurahIndex(){
+      overlay.classList.remove("open");
+    }
+
+    document.getElementById("surahIndexCloseBtn").addEventListener("click", closeSurahIndex);
+    overlay.addEventListener("click", function(e){ if(e.target === overlay) closeSurahIndex(); });
+  }
+
+  /* ---- ٢) قائمة إجراءات الآية: التفسير + استماع الآية ---- */
+
+  var ayahAudioPlayer = null;
+  var currentAyahActionContext = null;
+
+  function getCachedAyahTafsir(globalNumber){
+    try{ return localStorage.getItem(QURAN_TAFSIR_CACHE_PREFIX + globalNumber); }catch(e){ return null; }
+  }
+  function setCachedAyahTafsir(globalNumber, text){
+    try{ localStorage.setItem(QURAN_TAFSIR_CACHE_PREFIX + globalNumber, text); }catch(e){}
+  }
+  function getCachedAyahAudioUrl(globalNumber, edition){
+    try{ return localStorage.getItem(QURAN_AYAH_AUDIO_CACHE_PREFIX + globalNumber + "_" + edition); }catch(e){ return null; }
+  }
+  function setCachedAyahAudioUrl(globalNumber, edition, url){
+    try{ localStorage.setItem(QURAN_AYAH_AUDIO_CACHE_PREFIX + globalNumber + "_" + edition, url); }catch(e){}
+  }
+
+  function fetchAyahTafsir(globalNumber){
+    var cached = getCachedAyahTafsir(globalNumber);
+    if(cached) return Promise.resolve(cached);
+
+    var url = QURAN_API_AYAH_URL + globalNumber + "/" + QURAN_TAFSIR_EDITION;
+    return fetchWithTimeout(url, QURAN_FETCH_TIMEOUT_MS).then(function(json){
+      if(!json || json.code !== 200 || !json.data || !json.data.text){
+        throw new Error("bad_payload");
+      }
+      setCachedAyahTafsir(globalNumber, json.data.text);
+      return json.data.text;
+    });
+  }
+
+  function fetchAyahAudioUrl(globalNumber, edition){
+    var cached = getCachedAyahAudioUrl(globalNumber, edition);
+    if(cached) return Promise.resolve(cached);
+
+    var url = QURAN_API_AYAH_URL + globalNumber + "/" + edition;
+    return fetchWithTimeout(url, QURAN_FETCH_TIMEOUT_MS).then(function(json){
+      if(!json || json.code !== 200 || !json.data || !json.data.audio){
+        throw new Error("bad_payload");
+      }
+      setCachedAyahAudioUrl(globalNumber, edition, json.data.audio);
+      return json.data.audio;
+    });
+  }
+
+  function ensureAyahActionUI(){
+    if(document.getElementById("ayahActionOverlay")) return;
+
+    var overlay = document.createElement("div");
+    overlay.id = "ayahActionOverlay";
+    overlay.className = "sakina-modal-overlay";
+    overlay.innerHTML =
+      "<div class=\"sakina-modal-sheet\">" +
+        "<div class=\"sakina-modal-head\">" +
+          "<span class=\"sakina-modal-title ayah-action-title\" id=\"ayahActionTitle\">—</span>" +
+          "<button type=\"button\" class=\"sakina-modal-close\" id=\"ayahActionCloseBtn\">✕</button>" +
+        "</div>" +
+        "<div class=\"ayah-action-arabic\" id=\"ayahActionArabicText\"></div>" +
+        "<div class=\"ayah-action-buttons\">" +
+          "<button type=\"button\" class=\"ayah-action-btn\" id=\"ayahTafsirBtn\">📖<span>التفسير</span></button>" +
+          "<button type=\"button\" class=\"ayah-action-btn\" id=\"ayahListenBtn\">🎧<span>استماع الآية</span></button>" +
+        "</div>" +
+        "<div class=\"ayah-action-result\" id=\"ayahActionResult\"></div>" +
+      "</div>";
+    document.body.appendChild(overlay);
+
+    function closeAyahAction(){
+      overlay.classList.remove("open");
+      if(ayahAudioPlayer){
+        try{ ayahAudioPlayer.pause(); }catch(e){}
+      }
+      document.getElementById("ayahTafsirBtn").classList.remove("active");
+      document.getElementById("ayahListenBtn").classList.remove("active");
+    }
+
+    document.getElementById("ayahActionCloseBtn").addEventListener("click", closeAyahAction);
+    overlay.addEventListener("click", function(e){ if(e.target === overlay) closeAyahAction(); });
+
+    document.getElementById("ayahTafsirBtn").addEventListener("click", function(){
+      if(!currentAyahActionContext) return;
+      var resultEl = document.getElementById("ayahActionResult");
+      var btn = document.getElementById("ayahTafsirBtn");
+      btn.classList.add("active");
+      resultEl.innerHTML = "⏳ جاري تحميل التفسير...";
+
+      fetchAyahTafsir(currentAyahActionContext.global).then(function(text){
+        resultEl.innerHTML = "<div class=\"ayah-action-tafsir-text\">" + String(text).replace(/[<>]/g, "") + "</div>";
+      }).catch(function(){
+        resultEl.innerHTML =
+          "<div class=\"mushaf-error-box\">" +
+            "<div style=\"font-size:28px;\">📡</div>" +
+            "<div>⚠️ تعذّر تحميل التفسير الآن</div>" +
+            "<button type=\"button\" class=\"mushaf-retry-btn\" id=\"ayahTafsirRetryBtn\">إعادة المحاولة</button>" +
+          "</div>";
+        var retryBtn = document.getElementById("ayahTafsirRetryBtn");
+        if(retryBtn){
+          retryBtn.addEventListener("click", function(){ document.getElementById("ayahTafsirBtn").click(); });
+        }
+      });
+    });
+
+    document.getElementById("ayahListenBtn").addEventListener("click", function(){
+      if(!currentAyahActionContext) return;
+      var btn = document.getElementById("ayahListenBtn");
+      var resultEl = document.getElementById("ayahActionResult");
+      btn.classList.add("active");
+
+      var edition = getAyahAudioEdition(currentReciterKey);
+      resultEl.innerHTML = "⏳ جاري تحضير التلاوة...";
+
+      fetchAyahAudioUrl(currentAyahActionContext.global, edition).then(function(audioUrl){
+        if(!ayahAudioPlayer){
+          ayahAudioPlayer = new Audio();
+          ayahAudioPlayer.addEventListener("ended", function(){ btn.classList.remove("active"); });
+          ayahAudioPlayer.addEventListener("error", function(){
+            btn.classList.remove("active");
+            showToast("⚠️ تعذّر تشغيل تلاوة هذه الآية");
+          });
+        }
+        try{ ayahAudioPlayer.pause(); }catch(e){}
+        ayahAudioPlayer.src = audioUrl;
+        ayahAudioPlayer.currentTime = 0;
+        resultEl.innerHTML = "🎧 جاري تشغيل الآية بصوت " + getReciter(currentReciterKey).name;
+        var playPromise = ayahAudioPlayer.play();
+        if(playPromise && typeof playPromise.catch === "function"){
+          playPromise.catch(function(){
+            btn.classList.remove("active");
+            showToast("⚠️ تعذّر تشغيل الصوت تلقائياً — اضغط الزر مرة أخرى");
+          });
+        }
+      }).catch(function(){
+        btn.classList.remove("active");
+        resultEl.innerHTML =
+          "<div class=\"mushaf-error-box\">" +
+            "<div style=\"font-size:28px;\">📡</div>" +
+            "<div>⚠️ تعذّر تحميل تلاوة هذه الآية الآن</div>" +
+            "<button type=\"button\" class=\"mushaf-retry-btn\" id=\"ayahListenRetryBtn\">إعادة المحاولة</button>" +
+          "</div>";
+        var retryBtn2 = document.getElementById("ayahListenRetryBtn");
+        if(retryBtn2){
+          retryBtn2.addEventListener("click", function(){ document.getElementById("ayahListenBtn").click(); });
+        }
+      });
+    });
+  }
+
+  function openAyahActionSheet(unitEl){
+    ensureAyahActionUI();
+
+    var global = parseInt(unitEl.getAttribute("data-global"), 10);
+    var surah = unitEl.getAttribute("data-surah");
+    var numInSurah = unitEl.getAttribute("data-numinsurah");
+    var surahName = unitEl.getAttribute("data-surahname") || "";
+    if(!global) return;
+
+    currentAyahActionContext = { global: global, surah: surah, numInSurah: numInSurah };
+
+    document.querySelectorAll(".mushaf-ayah-unit.mushaf-ayah-active").forEach(function(el){
+      el.classList.remove("mushaf-ayah-active");
+    });
+    unitEl.classList.add("mushaf-ayah-active");
+
+    document.getElementById("ayahActionTitle").textContent = "سورة " + surahName + " — الآية " + numInSurah;
+    var arabicText = unitEl.querySelector(".mushaf-ayahs") ? unitEl.querySelector(".mushaf-ayahs").textContent : unitEl.textContent;
+    document.getElementById("ayahActionArabicText").textContent = (arabicText || "").trim();
+    document.getElementById("ayahActionResult").innerHTML = "";
+    document.getElementById("ayahTafsirBtn").classList.remove("active");
+    document.getElementById("ayahListenBtn").classList.remove("active");
+
+    document.getElementById("ayahActionOverlay").classList.add("open");
+  }
+
+  var mushafAyahClickDelegationBound = false;
+  function ensureAyahClickDelegation(textContainer){
+    if(mushafAyahClickDelegationBound || !textContainer) return;
+    mushafAyahClickDelegationBound = true;
+    textContainer.addEventListener("click", function(e){
+      var unit = e.target.closest ? e.target.closest(".mushaf-ayah-unit") : null;
+      if(!unit) return;
+      openAyahActionSheet(unit);
+    });
+  }
+
   function fitMushafFrameToViewport(){
     var frameEl = document.getElementById("mushafPageFrame");
     var textContainer = document.getElementById("mushafPageTextContainer");
@@ -1683,6 +2063,8 @@
   function renderMushafPage(pageNumber){
     injectMushafTextStyles();
     ensureTranslationSelector();
+    ensureSurahSearchUI();
+    ensureAyahActionUI();
 
     var imgEl = document.getElementById("mushafPageImage");
     if(imgEl) imgEl.style.display = "none";
@@ -1698,6 +2080,7 @@
       textContainer.className = "mushaf-text-page";
       frameEl.appendChild(textContainer);
     }
+    ensureAyahClickDelegation(textContainer);
 
     pageInput.value = pageNumber;
     document.getElementById("mushafPrevBtn").disabled = (pageNumber <= 1);
