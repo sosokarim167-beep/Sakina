@@ -1408,7 +1408,7 @@
     mushafStylesInjected = true;
     var styleEl = document.createElement("style");
     styleEl.textContent =
-      ".mushaf-text-page{width:100%;overflow-y:auto;padding:6px 4px;-webkit-overflow-scrolling:touch;" +
+      ".mushaf-text-page{width:100%;overflow:hidden;touch-action:pan-x;padding:6px 4px;" +
       "opacity:0;transition:opacity .22s ease;}" +
       ".mushaf-text-page.mushaf-fade-visible{opacity:1;}" +
       ".mushaf-surah-header{display:flex;align-items:center;justify-content:center;gap:8px;" +
@@ -1704,12 +1704,8 @@
 
   function ensureTranslationSelector(){
     if(document.getElementById("mushafTranslationSelect")) return;
-
-    var toolbar = document.querySelector(".mushaf-page-toolbar");
-    if(!toolbar || !toolbar.parentNode) return;
-
-    var bar = document.createElement("div");
-    bar.className = "mushaf-translation-bar";
+    var bar = ensureQuranExtrasBar();
+    if(!bar) return;
 
     var select = document.createElement("select");
     select.id = "mushafTranslationSelect";
@@ -1729,7 +1725,23 @@
     });
 
     bar.appendChild(select);
-    toolbar.parentNode.insertBefore(bar, toolbar.nextSibling);
+  }
+
+  // شريط مضغوط مستقل («📑 السور» + منتقي الترجمة) يُوضع فوق شريط التنقّل
+  // (السابقة/التالية/رقم الصفحة) في سطر منفصل تماماً، بحيث لا يزاحمه أو
+  // يُخفي أزراره مهما ضاق عرض الشاشة — إصلاح صريح لمشكلة تداخل عناصر التحكم
+  function ensureQuranExtrasBar(){
+    var existing = document.getElementById("mushafExtrasBar");
+    if(existing) return existing;
+
+    var toolbar = document.querySelector(".mushaf-page-toolbar");
+    if(!toolbar || !toolbar.parentNode) return null;
+
+    var bar = document.createElement("div");
+    bar.id = "mushafExtrasBar";
+    bar.className = "mushaf-translation-bar";
+    toolbar.parentNode.insertBefore(bar, toolbar);
+    return bar;
   }
 
   /* ---- ١) فهرس السور: بحث واختيار أي سورة بدل التنقّل بالصفحات فقط ---- */
@@ -1769,16 +1781,17 @@
   function ensureSurahSearchUI(){
     if(document.getElementById("surahIndexOverlay")) return;
 
-    var toolbar = document.querySelector(".mushaf-page-toolbar");
-    if(!toolbar) return;
+    var bar = ensureQuranExtrasBar();
+    if(!bar) return;
 
-    // زر فتح الفهرس: يُضاف داخل شريط أدوات القراءة نفسه
+    // زر فتح الفهرس: يُضاف في الشريط المضغوط المستقل أعلى شريط التنقّل —
+    // لا يشارك صف السابقة/التالية أبداً، فلا يمكنه تغطيتها أو دفعها خارج الشاشة
     var openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.id = "openSurahIndexBtn";
     openBtn.className = "mushaf-surah-btn";
     openBtn.textContent = "📑 السور";
-    toolbar.insertBefore(openBtn, toolbar.firstChild);
+    bar.insertBefore(openBtn, bar.firstChild);
 
     var overlay = document.createElement("div");
     overlay.id = "surahIndexOverlay";
@@ -1905,7 +1918,7 @@
         "<div class=\"ayah-action-arabic\" id=\"ayahActionArabicText\"></div>" +
         "<div class=\"ayah-action-buttons\">" +
           "<button type=\"button\" class=\"ayah-action-btn\" id=\"ayahTafsirBtn\">📖<span>التفسير</span></button>" +
-          "<button type=\"button\" class=\"ayah-action-btn\" id=\"ayahListenBtn\">🎧<span>استماع الآية</span></button>" +
+          "<button type=\"button\" class=\"ayah-action-btn\" id=\"ayahListenBtn\">🎧<span>استماع</span></button>" +
         "</div>" +
         "<div class=\"ayah-action-result\" id=\"ayahActionResult\"></div>" +
       "</div>";
@@ -2041,13 +2054,21 @@
     var bottomNavHeight = bottomNavEl ? bottomNavEl.getBoundingClientRect().height : 64;
     var SAFE_MARGIN = 14;
 
+    // يعادل calc(100vh - bottom_nav_height) محسوباً ديناميكياً ليشمل أيضاً
+    // ارتفاع الشريط المضغوط (فهرس السور/الترجمة) وحواف الأمان — بلا أي
+    // تمرير رأسي للصفحة نفسها؛ العنصر يملأ الارتفاع المتاح بدقة فقط
     var available = Math.floor(window.innerHeight - rect.top - bottomNavHeight - SAFE_MARGIN);
     if(available < 260) available = 260;
 
+    frameEl.style.height = available + "px";
     frameEl.style.maxHeight = available + "px";
     frameEl.style.overflow = "hidden";
+    frameEl.style.touchAction = "pan-x";
     if(textContainer){
+      textContainer.style.height = (available - 20) + "px";
       textContainer.style.maxHeight = (available - 20) + "px";
+      textContainer.style.overflow = "hidden";
+      textContainer.style.touchAction = "pan-x";
     }
   }
 
@@ -2221,6 +2242,324 @@
     renderMushafPage(currentPage);
   }
 
+
+  /* ================= AUTHENTICATION & PROFILE (Firebase Google / Guest) ================= */
+  //
+  // طبقة الهوية الأساسية: بوابة دخول أولى تعرض خيارين — تسجيل الدخول
+  // بحساب Google (عبر window.SakinaCloud.signInWithGoogle المُصدَّرة من
+  // firebase-init.js) أو المتابعة كضيف. الدخول المجهول (anonymous) يحدث
+  // فعلياً تلقائياً في الخلفية من firebase-init.js عند أول تحميل — لذا
+  // «المتابعة كضيف» هنا تعني فقط تأكيد اختيار المستخدم وإغلاق البوابة،
+  // مع تحذير واضح بأن حسابات الضيف لا تدخل سحب العمرة المجانية وقد تُفقد
+  // بياناتها عند تغيير الجهاز. تُبنى فوق هذا مركز ملف شخصي أولي (تصميم
+  // على طراز واجهات الألعاب: أفاتار + إطار + لقب + شبكة أوسمة + معرّف).
+
+  var AUTH_MODE_KEY = "sakina_auth_mode_v1"; // "google" | "guest"
+  var SAKINA_LOCAL_ID_KEY = "sakina_local_id_v1";
+
+  function loadAuthMode(){
+    try{ return localStorage.getItem(AUTH_MODE_KEY); }catch(e){ return null; }
+  }
+  function saveAuthMode(mode){
+    try{ localStorage.setItem(AUTH_MODE_KEY, mode); }catch(e){}
+  }
+
+  function getOrCreateLocalId(){
+    try{
+      var existing = localStorage.getItem(SAKINA_LOCAL_ID_KEY);
+      if(existing) return existing;
+      var id = "SKN-" + Math.random().toString(36).slice(2, 8).toUpperCase();
+      localStorage.setItem(SAKINA_LOCAL_ID_KEY, id);
+      return id;
+    }catch(e){
+      return "SKN-GUEST";
+    }
+  }
+
+  var authStylesInjected = false;
+  function injectAuthStyles(){
+    if(authStylesInjected) return;
+    authStylesInjected = true;
+    var styleEl = document.createElement("style");
+    styleEl.textContent =
+      /* ---- عناصر نافذة مشتركة (نفس تصميم نوافذ فهرس السور/إجراءات الآية،
+         مُعرَّفة هنا بشكل مستقل حتى تكون متاحة فوراً عند الإقلاع دون
+         انتظار فتح قسم القرآن أولاً) ---- */
+      ".sakina-modal-overlay{position:fixed;inset:0;background:rgba(4,8,16,.72);z-index:200;" +
+      "display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;" +
+      "transition:opacity .2s ease;}" +
+      ".sakina-modal-overlay.open{opacity:1;pointer-events:auto;}" +
+      ".sakina-modal-sheet{width:100%;max-width:480px;background:var(--surface-1,#0e1626);" +
+      "border-radius:18px 18px 0 0;max-height:86vh;display:flex;flex-direction:column;" +
+      "transform:translateY(16px);transition:transform .2s ease;overflow-y:auto;" +
+      "box-shadow:0 -12px 40px -10px rgba(0,0,0,.6);padding-bottom:env(safe-area-inset-bottom);}" +
+      ".sakina-modal-overlay.open .sakina-modal-sheet{transform:translateY(0);}" +
+      ".sakina-modal-head{display:flex;align-items:center;justify-content:space-between;" +
+      "padding:16px 16px 8px;}" +
+      ".sakina-modal-title{font-family:'Cairo',sans-serif;font-weight:800;font-size:16px;color:var(--text);}" +
+      ".sakina-modal-close{background:none;border:none;color:var(--text-dim);font-size:20px;" +
+      "cursor:pointer;line-height:1;padding:4px 8px;}" +
+      /* ---- بوابة الدخول (Google / ضيف) ---- */
+      ".auth-gate-overlay{position:fixed;inset:0;z-index:300;background:radial-gradient(circle at 50% 20%,#132038,#050a14 75%);" +
+      "display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;" +
+      "pointer-events:none;transition:opacity .25s ease;}" +
+      ".auth-gate-overlay.open{opacity:1;pointer-events:auto;}" +
+      ".auth-gate-card{width:100%;max-width:360px;background:var(--surface-1,#0e1626);" +
+      "border:1px solid var(--border,rgba(255,255,255,.08));border-radius:20px;padding:28px 22px;" +
+      "text-align:center;box-shadow:0 20px 60px -20px rgba(0,0,0,.7);}" +
+      ".auth-gate-logo{font-size:46px;margin-bottom:8px;}" +
+      ".auth-gate-title{font-family:'Amiri',serif;font-size:26px;color:var(--gold,#d4af37);margin:0 0 4px;}" +
+      ".auth-gate-sub{font-family:'Cairo',sans-serif;font-size:13px;color:var(--text-dim);margin:0 0 22px;}" +
+      ".auth-gate-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;" +
+      "padding:13px 14px;border-radius:12px;border:none;font-family:'Cairo',sans-serif;font-size:14.5px;" +
+      "font-weight:700;cursor:pointer;margin-bottom:10px;}" +
+      ".auth-gate-btn-google{background:#fff;color:#1f1f1f;}" +
+      ".auth-gate-btn-google:disabled{opacity:.6;cursor:default;}" +
+      ".auth-gate-btn-icon{display:inline-flex;align-items:center;justify-content:center;" +
+      "width:20px;height:20px;border-radius:50%;background:#4285F4;color:#fff;font-size:12px;font-weight:800;}" +
+      ".auth-gate-btn-guest{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}" +
+      ".auth-gate-warning{margin-top:14px;font-family:'Cairo',sans-serif;font-size:11.5px;line-height:1.8;" +
+      "color:#e0b34d;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.25);" +
+      "border-radius:10px;padding:10px 12px;text-align:right;}" +
+      /* ---- زر فتح الملف الشخصي داخل الترويسة ---- */
+      ".profile-hub-trigger{width:38px;height:38px;border-radius:50%;border:2px solid var(--gold,#d4af37);" +
+      "background:var(--surface-2);color:var(--text);display:flex;align-items:center;justify-content:center;" +
+      "font-size:17px;cursor:pointer;overflow:hidden;flex-shrink:0;margin-inline-start:8px;}" +
+      ".profile-hub-mini-img{width:100%;height:100%;object-fit:cover;border-radius:50%;}" +
+      /* ---- مركز الملف الشخصي (طراز واجهات الألعاب: أفاتار/إطار/لقب/أوسمة/معرّف) ---- */
+      ".profile-hub-body{padding:6px 20px 22px;text-align:center;}" +
+      ".profile-hub-avatar-wrap{display:flex;justify-content:center;margin-bottom:10px;}" +
+      ".profile-hub-frame{width:104px;height:104px;border-radius:50%;display:flex;align-items:center;" +
+      "justify-content:center;background:conic-gradient(from 0deg, var(--gold,#d4af37), var(--teal,#14b8a6)," +
+      "var(--emerald,#10b981), var(--gold,#d4af37));padding:4px;}" +
+      ".profile-hub-avatar{width:100%;height:100%;border-radius:50%;background:var(--surface-2);" +
+      "display:flex;align-items:center;justify-content:center;font-size:38px;color:var(--text);" +
+      "overflow:hidden;border:3px solid var(--surface-1,#0e1626);}" +
+      ".profile-hub-avatar-img{width:100%;height:100%;object-fit:cover;}" +
+      ".profile-hub-name{font-family:'Cairo',sans-serif;font-weight:800;font-size:18px;color:var(--text);" +
+      "margin-top:4px;}" +
+      ".profile-hub-title-badge{display:inline-block;margin-top:6px;padding:4px 14px;border-radius:20px;" +
+      "background:rgba(20,184,166,.15);border:1px solid rgba(20,184,166,.35);color:var(--teal,#14b8a6);" +
+      "font-family:'Cairo',sans-serif;font-size:12.5px;font-weight:700;}" +
+      ".profile-hub-id{margin-top:8px;font-family:'Cairo',sans-serif;font-size:11.5px;letter-spacing:.5px;" +
+      "color:var(--text-dim);direction:ltr;}" +
+      ".profile-hub-section-label{margin:22px 0 10px;text-align:right;font-family:'Cairo',sans-serif;" +
+      "font-size:13px;font-weight:700;color:var(--text-dim);}" +
+      ".profile-hub-badges-grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;}" +
+      ".profile-hub-badge-cell{background:var(--surface-2);border:1px solid var(--border);" +
+      "border-radius:12px;padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:5px;}" +
+      ".profile-hub-badge-icon{font-size:22px;opacity:.9;}" +
+      ".profile-hub-badge-label{font-family:'Cairo',sans-serif;font-size:10.5px;color:var(--text-dim);}" +
+      ".profile-hub-account-row{margin-top:20px;}" +
+      ".profile-hub-upgrade-btn{width:100%;padding:12px;border-radius:12px;border:none;" +
+      "background:linear-gradient(135deg, var(--teal,#14b8a6), var(--emerald,#10b981));color:#fff;" +
+      "font-family:'Cairo',sans-serif;font-size:13.5px;font-weight:700;cursor:pointer;}" +
+      ".profile-hub-guest-warning{margin-top:12px;font-family:'Cairo',sans-serif;font-size:11px;" +
+      "line-height:1.8;color:#e0b34d;text-align:right;}";
+    document.head.appendChild(styleEl);
+  }
+
+  function ensureAuthGate(){
+    injectAuthStyles();
+    if(document.getElementById("authGateOverlay")) return;
+
+    var overlay = document.createElement("div");
+    overlay.id = "authGateOverlay";
+    overlay.className = "auth-gate-overlay";
+    overlay.innerHTML =
+      "<div class=\"auth-gate-card\">" +
+        "<div class=\"auth-gate-logo\">🌙</div>" +
+        "<div class=\"auth-gate-title\">سَكينة</div>" +
+        "<div class=\"auth-gate-sub\">رفيقك في بناء العادات والقرب من الله</div>" +
+        "<button type=\"button\" class=\"auth-gate-btn auth-gate-btn-google\" id=\"authGoogleBtn\">" +
+          "<span class=\"auth-gate-btn-icon\">G</span><span>المتابعة بحساب Google</span>" +
+        "</button>" +
+        "<button type=\"button\" class=\"auth-gate-btn auth-gate-btn-guest\" id=\"authGuestBtn\">المتابعة كضيف</button>" +
+        "<div class=\"auth-gate-warning\">⚠️ حسابات الضيف لا يمكنها المشاركة في سحب العمرة المجانية، " +
+          "وقد تفقد بياناتك عند تغيير الجهاز أو حذف التطبيق. سجّل دخولك بحساب Google لحفظ تقدّمك " +
+          "ومزامنته عبر أجهزتك.</div>" +
+      "</div>";
+    document.body.appendChild(overlay);
+
+    document.getElementById("authGuestBtn").addEventListener("click", function(){
+      saveAuthMode("guest");
+      hideAuthGate();
+    });
+
+    document.getElementById("authGoogleBtn").addEventListener("click", function(){
+      var btn = document.getElementById("authGoogleBtn");
+      if(!window.SakinaCloud || !window.SakinaCloud.isReady() || typeof window.SakinaCloud.signInWithGoogle !== "function"){
+        showToast("⚠️ تسجيل الدخول بجوجل غير متاح حالياً — يمكنك المتابعة كضيف والربط لاحقاً");
+        return;
+      }
+      btn.disabled = true;
+      btn.innerHTML = "<span>⏳ جاري تسجيل الدخول...</span>";
+      window.SakinaCloud.signInWithGoogle().then(function(){
+        saveAuthMode("google");
+        hideAuthGate();
+      }).catch(function(err){
+        console.warn("Sakina: فشل تسجيل الدخول بجوجل", err);
+        btn.disabled = false;
+        btn.innerHTML = "<span class=\"auth-gate-btn-icon\">G</span><span>المتابعة بحساب Google</span>";
+        showToast("⚠️ تعذّر تسجيل الدخول بجوجل — حاول مرة أخرى أو تابع كضيف");
+      });
+    });
+  }
+
+  function hideAuthGate(){
+    var overlay = document.getElementById("authGateOverlay");
+    if(overlay) overlay.classList.remove("open");
+    renderProfileHub();
+  }
+
+  function showAuthGateIfNeeded(){
+    var mode = loadAuthMode();
+    if(mode === "guest" || mode === "google") return;
+    ensureAuthGate();
+    requestAnimationFrame(function(){
+      var overlay = document.getElementById("authGateOverlay");
+      if(overlay) overlay.classList.add("open");
+    });
+  }
+
+  var PROFILE_BADGE_SLOTS = [
+    { icon: "📿", label: "الأذكار" },
+    { icon: "🔥", label: "الاستمرارية" },
+    { icon: "📖", label: "القرآن" },
+    { icon: "🕋", label: "الصلاة" },
+    { icon: "🌙", label: "قيام الليل" },
+    { icon: "🤲", label: "الدعاء" }
+  ];
+
+  function ensureProfileHubUI(){
+    injectAuthStyles();
+
+    if(!document.getElementById("profileHubBtn")){
+      var headerTop = document.querySelector(".header-top");
+      if(headerTop){
+        var trigger = document.createElement("button");
+        trigger.type = "button";
+        trigger.id = "profileHubBtn";
+        trigger.className = "profile-hub-trigger";
+        trigger.innerHTML = "<span id=\"profileHubAvatarMini\">🧑</span>";
+        headerTop.appendChild(trigger);
+        trigger.addEventListener("click", openProfileHub);
+      }
+    }
+
+    if(!document.getElementById("profileHubOverlay")){
+      var overlay = document.createElement("div");
+      overlay.id = "profileHubOverlay";
+      overlay.className = "sakina-modal-overlay";
+      overlay.innerHTML =
+        "<div class=\"sakina-modal-sheet\">" +
+          "<div class=\"sakina-modal-head\">" +
+            "<span class=\"sakina-modal-title\">👤 الملف الشخصي</span>" +
+            "<button type=\"button\" class=\"sakina-modal-close\" id=\"profileHubCloseBtn\">✕</button>" +
+          "</div>" +
+          "<div class=\"profile-hub-body\">" +
+            "<div class=\"profile-hub-avatar-wrap\">" +
+              "<div class=\"profile-hub-frame\" id=\"profileHubFrame\">" +
+                "<div class=\"profile-hub-avatar\" id=\"profileHubAvatar\">🧑</div>" +
+              "</div>" +
+            "</div>" +
+            "<div class=\"profile-hub-name\" id=\"profileHubName\">—</div>" +
+            "<div class=\"profile-hub-title-badge\" id=\"profileHubTitle\">🌱 مستخدم جديد</div>" +
+            "<div class=\"profile-hub-id\" id=\"profileHubId\">—</div>" +
+            "<div class=\"profile-hub-section-label\">🏅 الأوسمة</div>" +
+            "<div class=\"profile-hub-badges-grid\" id=\"profileHubBadgesGrid\"></div>" +
+            "<div class=\"profile-hub-account-row\" id=\"profileHubAccountRow\"></div>" +
+          "</div>" +
+        "</div>";
+      document.body.appendChild(overlay);
+
+      document.getElementById("profileHubCloseBtn").addEventListener("click", closeProfileHub);
+      overlay.addEventListener("click", function(e){ if(e.target === overlay) closeProfileHub(); });
+    }
+  }
+
+  function openProfileHub(){
+    ensureProfileHubUI();
+    renderProfileHub();
+    document.getElementById("profileHubOverlay").classList.add("open");
+  }
+
+  function closeProfileHub(){
+    var overlay = document.getElementById("profileHubOverlay");
+    if(overlay) overlay.classList.remove("open");
+  }
+
+  function renderProfileHub(){
+    ensureProfileHubUI();
+
+    var user = (window.SakinaCloud && typeof window.SakinaCloud.getCurrentUser === "function")
+      ? window.SakinaCloud.getCurrentUser() : null;
+    var isGoogleUser = !!(user && !user.isAnonymous);
+
+    var avatarEl = document.getElementById("profileHubAvatar");
+    var miniAvatarEl = document.getElementById("profileHubAvatarMini");
+    var nameEl = document.getElementById("profileHubName");
+    var titleEl = document.getElementById("profileHubTitle");
+    var idEl = document.getElementById("profileHubId");
+    var accountRow = document.getElementById("profileHubAccountRow");
+    var badgesGrid = document.getElementById("profileHubBadgesGrid");
+    if(!avatarEl || !nameEl) return;
+
+    if(isGoogleUser && user.photoURL){
+      avatarEl.innerHTML = "<img src=\"" + user.photoURL + "\" alt=\"\" class=\"profile-hub-avatar-img\">";
+      if(miniAvatarEl) miniAvatarEl.innerHTML = "<img src=\"" + user.photoURL + "\" alt=\"\" class=\"profile-hub-mini-img\">";
+    }else{
+      var initial = (isGoogleUser && user.displayName) ? user.displayName.trim().charAt(0).toUpperCase() : "🧑";
+      avatarEl.textContent = initial;
+      if(miniAvatarEl) miniAvatarEl.textContent = isGoogleUser ? initial : "🧑";
+    }
+
+    nameEl.textContent = isGoogleUser ? (user.displayName || "مستخدم سَكينة") : "ضيف";
+    titleEl.textContent = isGoogleUser ? "🌟 عضو مسجّل" : "🌱 وضع الضيف";
+    idEl.textContent = "ID: " + (isGoogleUser ? user.uid.slice(0, 8).toUpperCase() : getOrCreateLocalId());
+
+    badgesGrid.innerHTML = "";
+    PROFILE_BADGE_SLOTS.forEach(function(b){
+      var cell = document.createElement("div");
+      cell.className = "profile-hub-badge-cell";
+      cell.innerHTML = "<div class=\"profile-hub-badge-icon\">" + b.icon + "</div>" +
+        "<div class=\"profile-hub-badge-label\">" + b.label + "</div>";
+      badgesGrid.appendChild(cell);
+    });
+
+    accountRow.innerHTML = "";
+    if(!isGoogleUser){
+      var upgradeBtn = document.createElement("button");
+      upgradeBtn.type = "button";
+      upgradeBtn.className = "profile-hub-upgrade-btn";
+      upgradeBtn.textContent = "🔗 ربط حساب Google";
+      upgradeBtn.addEventListener("click", function(){
+        if(!window.SakinaCloud || !window.SakinaCloud.isReady() || typeof window.SakinaCloud.signInWithGoogle !== "function"){
+          showToast("⚠️ تسجيل الدخول بجوجل غير متاح حالياً");
+          return;
+        }
+        upgradeBtn.disabled = true;
+        window.SakinaCloud.signInWithGoogle().then(function(){
+          saveAuthMode("google");
+          renderProfileHub();
+        }).catch(function(err){
+          console.warn("Sakina: فشل ربط حساب جوجل", err);
+          upgradeBtn.disabled = false;
+          showToast("⚠️ تعذّر تسجيل الدخول بجوجل");
+        });
+      });
+      accountRow.appendChild(upgradeBtn);
+
+      var warn = document.createElement("div");
+      warn.className = "profile-hub-guest-warning";
+      warn.textContent = "⚠️ وضع الضيف: لا يمكنك المشاركة في سحب العمرة المجانية، وقد تفقد بياناتك عند تغيير الجهاز.";
+      accountRow.appendChild(warn);
+    }
+  }
+
+  window.addEventListener("sakina-auth-changed", function(){
+    renderProfileHub();
+  });
 
   /* ================= SETTINGS ================= */
 
@@ -4063,6 +4402,9 @@
   initUmrahCounter();
   mergeCloudHabitsOnStartup();
   mergeCloudQuranProgressOnStartup();
+  ensureProfileHubUI();
+  renderProfileHub();
+  showAuthGateIfNeeded();
 
   setInterval(updateHeader, 60000);
 })();
