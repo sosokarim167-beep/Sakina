@@ -1445,6 +1445,20 @@
       ".mushaf-ayahs .mushaf-ayah-unit{padding:2px 1px;}" +
       ".mushaf-ayah-unit:active,.mushaf-ayah-unit.mushaf-ayah-active{background-color:rgba(20,184,166,.18);}" +
       ".mushaf-ayah-block.mushaf-ayah-unit{padding:4px 6px;}" +
+      /* ---- وضع القراءة الغامر (بلا ترويسة/أشرطة بحث/مبدّل أوضاع) ---- */
+      "body.quran-immersive-active header{display:none !important;}" +
+      "body.quran-immersive-active .quran-mode-row{display:none !important;}" +
+      ".mushaf-immersive-toggle{display:none;position:fixed;" +
+      "top:calc(10px + env(safe-area-inset-top,0px));inset-inline-end:14px;z-index:160;" +
+      "width:38px;height:38px;border-radius:50%;border:1px solid var(--border);" +
+      "background:rgba(14,22,38,.82);backdrop-filter:blur(8px);color:var(--text);font-size:17px;" +
+      "display:none;align-items:center;justify-content:center;cursor:pointer;}" +
+      "body.quran-immersive-active .mushaf-immersive-toggle{display:flex;}" +
+      ".mushaf-tap-zone{position:absolute;top:0;bottom:0;width:22%;z-index:5;background:transparent;}" +
+      ".mushaf-tap-zone-right{inset-inline-start:0;}" +
+      ".mushaf-tap-zone-left{inset-inline-end:0;}" +
+      ".mushaf-page-frame{position:relative;}" +
+      ".mushaf-page-image{object-fit:contain;}" +
       /* ---- نافذة فهرس السور (بحث + قائمة) ---- */
       ".sakina-modal-overlay{position:fixed;inset:0;background:rgba(4,8,16,.72);z-index:200;" +
       "display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;" +
@@ -2201,12 +2215,97 @@
     }, { passive: true });
   })();
 
+  // مناطق نقر خفية على حافّتي الصفحة لتقليب الصفحات (بديل/مكمّل للسحب)،
+  // محصورة بعرض ضيّق حتى لا تتعارض مع النقر على الآيات في منتصف الصفحة
+  function ensureMushafTapZones(){
+    if(document.getElementById("mushafTapZoneRight")) return;
+    var frame = document.getElementById("mushafPageFrame");
+    if(!frame) return;
+
+    var rightZone = document.createElement("div");
+    rightZone.id = "mushafTapZoneRight";
+    rightZone.className = "mushaf-tap-zone mushaf-tap-zone-right";
+    rightZone.addEventListener("click", function(){ goToPage(currentPage - 1); });
+
+    var leftZone = document.createElement("div");
+    leftZone.id = "mushafTapZoneLeft";
+    leftZone.className = "mushaf-tap-zone mushaf-tap-zone-left";
+    leftZone.addEventListener("click", function(){ goToPage(currentPage + 1); });
+
+    frame.appendChild(rightZone);
+    frame.appendChild(leftZone);
+  }
+
+  /* ================= QURAN READER — IMMERSIVE READING & CONTROLS OVERLAY ================= */
+  //
+  // في وضع «القراءة النصية»، تُخفى الترويسة العلوية وشريط البحث/الترجمة
+  // ومبدّل الأوضاع تماماً كي تملأ صفحة المصحف الشاشة، ويبقى شريط التنقل
+  // السفلي وحده ثابتاً كالمعتاد. للوصول إلى السابقة/التالية/رقم الصفحة أو
+  // فهرس السور/الترجمة أثناء القراءة الغامرة، ينقلان مرة واحدة إلى نافذة
+  // منبثقة صغيرة (quranControlsOverlay) يفتحها زر عائم «☰» — فلا يمكن لأي
+  // من هذه العناصر أن يُغطّي أزرار التنقل بعد الآن لأنها ببساطة ليست في
+  // التخطيط الطبيعي للصفحة إلا عند طلبها صراحة.
+
+  function ensureQuranControlsOverlay(){
+    if(document.getElementById("quranControlsOverlay")) return;
+
+    var toolbar = document.querySelector(".mushaf-page-toolbar");
+    var extrasBar = document.getElementById("mushafExtrasBar");
+    var quranView = document.getElementById("view-quran");
+    if(!toolbar || !quranView) return;
+
+    var toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.id = "quranControlsToggleBtn";
+    toggleBtn.className = "mushaf-immersive-toggle";
+    toggleBtn.innerHTML = "☰";
+    quranView.appendChild(toggleBtn);
+
+    var overlay = document.createElement("div");
+    overlay.id = "quranControlsOverlay";
+    overlay.className = "sakina-modal-overlay";
+    var sheet = document.createElement("div");
+    sheet.className = "sakina-modal-sheet";
+    sheet.innerHTML =
+      "<div class=\"sakina-modal-head\">" +
+        "<span class=\"sakina-modal-title\">📖 التنقّل والإعدادات</span>" +
+        "<button type=\"button\" class=\"sakina-modal-close\" id=\"quranControlsCloseBtn\">✕</button>" +
+      "</div>";
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+
+    // نقل عناصر التحكم الفعلية (لا نسخها) إلى داخل النافذة المنبثقة —
+    // تبقى مستمعات الأحداث الأصلية عليها سليمة تماماً بعد النقل
+    if(extrasBar) sheet.appendChild(extrasBar);
+    sheet.appendChild(toolbar);
+
+    function openOverlay(){
+      overlay.classList.add("open");
+    }
+    function closeOverlay(){
+      overlay.classList.remove("open");
+    }
+
+    toggleBtn.addEventListener("click", openOverlay);
+    document.getElementById("quranControlsCloseBtn").addEventListener("click", closeOverlay);
+    overlay.addEventListener("click", function(e){ if(e.target === overlay) closeOverlay(); });
+
+    // إغلاق تلقائي بعد أي تنقّل صفحة داخل النافذة، حفاظاً على سلاسة القراءة
+    overlay.addEventListener("click", function(e){
+      var isNavAction = e.target.closest && (e.target.closest(".mushaf-nav-btn") || e.target.id === "openSurahIndexBtn");
+      if(isNavAction){
+        setTimeout(closeOverlay, 200);
+      }
+    });
+  }
+
   /* ================= QURAN READER — READ / LISTEN MODE SWITCH ================= */
   //
   // إصلاح زر «🎧 استماع»: لم يكن مربوطاً بأي مستمع نقر سابقاً، فلا شيء
   // كان يحدث عند الضغط عليه. الآن يُبدّل بشكل صريح بين قسم القراءة
   // النصية (quranReadSection) وقسم الاستماع (quranListenSection)، ويُحدّث
-  // حالة "active" على كلا الزرين.
+  // حالة "active" على كلا الزرين. الدخول لوضع القراءة يُفعّل أيضاً وضع
+  // الشاشة الكاملة الغامر (انظر القسم أعلاه)، ويُلغى عند الخروج منه.
 
   function switchQuranMode(mode){
     var readBtn = document.getElementById("quranModeReadBtn");
@@ -2221,7 +2320,11 @@
     readSection.style.display = isRead ? "" : "none";
     listenSection.style.display = isRead ? "none" : "";
 
+    document.body.classList.toggle("quran-immersive-active", isRead);
+
     if(isRead){
+      ensureQuranControlsOverlay();
+      ensureMushafTapZones();
       setTimeout(fitMushafFrameToViewport, 30);
     }
   }
@@ -2240,21 +2343,28 @@
   function initReadingMode(){
     initQuranModeSwitch();
     renderMushafPage(currentPage);
+    switchQuranMode("read"); // القراءة النصية هي الوضع الافتراضي عند فتح قسم القرآن
   }
 
 
-  /* ================= AUTHENTICATION & PROFILE (Firebase Google / Guest) ================= */
+  /* ================= AUTHENTICATION & PROFILE (Firebase Google / Email / Guest) ================= */
   //
-  // طبقة الهوية الأساسية: بوابة دخول أولى تعرض خيارين — تسجيل الدخول
-  // بحساب Google (عبر window.SakinaCloud.signInWithGoogle المُصدَّرة من
-  // firebase-init.js) أو المتابعة كضيف. الدخول المجهول (anonymous) يحدث
-  // فعلياً تلقائياً في الخلفية من firebase-init.js عند أول تحميل — لذا
-  // «المتابعة كضيف» هنا تعني فقط تأكيد اختيار المستخدم وإغلاق البوابة،
-  // مع تحذير واضح بأن حسابات الضيف لا تدخل سحب العمرة المجانية وقد تُفقد
-  // بياناتها عند تغيير الجهاز. تُبنى فوق هذا مركز ملف شخصي أولي (تصميم
-  // على طراز واجهات الألعاب: أفاتار + إطار + لقب + شبكة أوسمة + معرّف).
+  // نافذة دخول واحدة موحّدة (auth-modal) تُستخدم في حالتين: بوابة الإقلاع
+  // الأولى (mode="gate" — لا يمكن إغلاقها إلا باختيار وسيلة، وآخرها
+  // «المتابعة كضيف»)، وربط حساب لاحقاً من الملف الشخصي (mode="link" —
+  // قابلة للإغلاق لأن وضع الضيف نشط أصلاً). تعرض النافذة: تسجيل الدخول
+  // بجوجل (مع بديل إعادة توجيه تلقائي إن حُظرت النافذة المنبثقة)، دخول
+  // بالبريد الإلكتروني وكلمة المرور (تسجيل دخول أو إنشاء حساب)، والمتابعة
+  // كضيف — عبر الجسر window.SakinaCloud المُصدَّر من firebase-init.js (كل
+  // نداء محروس بفحص typeof كي لا ينهار التطبيق إن كانت دالة ما غير متاحة
+  // بعد على هذا الإصدار). تحديث الواجهة عند نجاح الدخول يتم تفاعلياً عبر
+  // الحدث المخصَّص "sakina-auth-changed" الذي يبثّه firebase-init.js عوضاً
+  // عن onAuthStateChanged المباشر (غير متاح هنا لأن ذلك الملف وحدة ES
+  // منفصلة). يليها مركز ملف شخصي أولي (طراز واجهات الألعاب) بلا أي أوسمة
+  // وهمية جاهزة — فقط حالة فارغة نظيفة وخانات مقفلة رمادية حتى يُبنى نظام
+  // إنجازات حقيقي لاحقاً.
 
-  var AUTH_MODE_KEY = "sakina_auth_mode_v1"; // "google" | "guest"
+  var AUTH_MODE_KEY = "sakina_auth_mode_v1"; // "google" | "email" | "guest"
   var SAKINA_LOCAL_ID_KEY = "sakina_local_id_v1";
 
   function loadAuthMode(){
@@ -2299,26 +2409,39 @@
       ".sakina-modal-title{font-family:'Cairo',sans-serif;font-weight:800;font-size:16px;color:var(--text);}" +
       ".sakina-modal-close{background:none;border:none;color:var(--text-dim);font-size:20px;" +
       "cursor:pointer;line-height:1;padding:4px 8px;}" +
-      /* ---- بوابة الدخول (Google / ضيف) ---- */
-      ".auth-gate-overlay{position:fixed;inset:0;z-index:300;background:radial-gradient(circle at 50% 20%,#132038,#050a14 75%);" +
-      "display:flex;align-items:center;justify-content:center;padding:24px;opacity:0;" +
-      "pointer-events:none;transition:opacity .25s ease;}" +
-      ".auth-gate-overlay.open{opacity:1;pointer-events:auto;}" +
-      ".auth-gate-card{width:100%;max-width:360px;background:var(--surface-1,#0e1626);" +
-      "border:1px solid var(--border,rgba(255,255,255,.08));border-radius:20px;padding:28px 22px;" +
-      "text-align:center;box-shadow:0 20px 60px -20px rgba(0,0,0,.7);}" +
-      ".auth-gate-logo{font-size:46px;margin-bottom:8px;}" +
-      ".auth-gate-title{font-family:'Amiri',serif;font-size:26px;color:var(--gold,#d4af37);margin:0 0 4px;}" +
-      ".auth-gate-sub{font-family:'Cairo',sans-serif;font-size:13px;color:var(--text-dim);margin:0 0 22px;}" +
-      ".auth-gate-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;" +
-      "padding:13px 14px;border-radius:12px;border:none;font-family:'Cairo',sans-serif;font-size:14.5px;" +
+      /* ---- نافذة تسجيل الدخول الموحّدة (Google / بريد إلكتروني / ضيف) ---- */
+      ".auth-modal-overlay{position:fixed;inset:0;z-index:300;" +
+      "background:radial-gradient(circle at 50% 20%,#132038,#050a14 75%);display:flex;" +
+      "align-items:center;justify-content:center;padding:24px;opacity:0;pointer-events:none;" +
+      "transition:opacity .25s ease;overflow-y:auto;}" +
+      ".auth-modal-overlay.open{opacity:1;pointer-events:auto;}" +
+      ".auth-modal-card{width:100%;max-width:360px;background:var(--surface-1,#0e1626);" +
+      "border:1px solid var(--border,rgba(255,255,255,.08));border-radius:20px;padding:26px 22px;" +
+      "text-align:center;box-shadow:0 20px 60px -20px rgba(0,0,0,.7);position:relative;margin:auto 0;}" +
+      ".auth-modal-close-x{position:absolute;top:10px;inset-inline-start:10px;background:none;" +
+      "border:none;color:var(--text-dim);font-size:18px;cursor:pointer;padding:6px;}" +
+      ".auth-modal-logo{font-size:42px;margin-bottom:6px;}" +
+      ".auth-modal-title{font-family:'Amiri',serif;font-size:24px;color:var(--gold,#d4af37);margin:0 0 4px;}" +
+      ".auth-modal-sub{font-family:'Cairo',sans-serif;font-size:12.5px;color:var(--text-dim);margin:0 0 18px;}" +
+      ".auth-modal-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;" +
+      "padding:12px 14px;border-radius:12px;border:none;font-family:'Cairo',sans-serif;font-size:14px;" +
       "font-weight:700;cursor:pointer;margin-bottom:10px;}" +
-      ".auth-gate-btn-google{background:#fff;color:#1f1f1f;}" +
-      ".auth-gate-btn-google:disabled{opacity:.6;cursor:default;}" +
-      ".auth-gate-btn-icon{display:inline-flex;align-items:center;justify-content:center;" +
+      ".auth-modal-btn-google{background:#fff;color:#1f1f1f;}" +
+      ".auth-modal-btn-google:disabled,.auth-modal-btn-submit:disabled{opacity:.6;cursor:default;}" +
+      ".auth-modal-btn-icon{display:inline-flex;align-items:center;justify-content:center;" +
       "width:20px;height:20px;border-radius:50%;background:#4285F4;color:#fff;font-size:12px;font-weight:800;}" +
-      ".auth-gate-btn-guest{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}" +
-      ".auth-gate-warning{margin-top:14px;font-family:'Cairo',sans-serif;font-size:11.5px;line-height:1.8;" +
+      ".auth-modal-btn-guest{background:var(--surface-2);color:var(--text);border:1px solid var(--border);}" +
+      ".auth-modal-divider{display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--text-dim);" +
+      "font-family:'Cairo',sans-serif;font-size:11.5px;}" +
+      ".auth-modal-divider::before,.auth-modal-divider::after{content:\"\";flex:1;height:1px;background:var(--border);}" +
+      ".auth-modal-field{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--border);" +
+      "background:var(--surface-2);color:var(--text);font-family:'Cairo',sans-serif;font-size:13.5px;" +
+      "margin-bottom:9px;outline:none;direction:ltr;text-align:right;}" +
+      ".auth-modal-btn-submit{background:linear-gradient(135deg, var(--teal,#14b8a6), var(--emerald,#10b981));color:#fff;}" +
+      ".auth-modal-toggle-mode{background:none;border:none;color:var(--teal,#14b8a6);" +
+      "font-family:'Cairo',sans-serif;font-size:12.5px;cursor:pointer;margin:2px 0 14px;text-decoration:underline;}" +
+      ".auth-modal-error{color:#ff6b6b;font-family:'Cairo',sans-serif;font-size:12px;margin:-2px 0 10px;min-height:14px;}" +
+      ".auth-modal-warning{margin-top:6px;font-family:'Cairo',sans-serif;font-size:11.5px;line-height:1.8;" +
       "color:#e0b34d;background:rgba(212,175,55,.08);border:1px solid rgba(212,175,55,.25);" +
       "border-radius:10px;padding:10px 12px;text-align:right;}" +
       /* ---- زر فتح الملف الشخصي داخل الترويسة ---- */
@@ -2345,9 +2468,12 @@
       "color:var(--text-dim);direction:ltr;}" +
       ".profile-hub-section-label{margin:22px 0 10px;text-align:right;font-family:'Cairo',sans-serif;" +
       "font-size:13px;font-weight:700;color:var(--text-dim);}" +
-      ".profile-hub-badges-grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;}" +
+      ".profile-hub-badges-empty{font-family:'Cairo',sans-serif;font-size:12.5px;color:var(--text-dim);" +
+      "text-align:center;margin-bottom:12px;}" +
+      ".profile-hub-badges-locked-grid{display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;}" +
       ".profile-hub-badge-cell{background:var(--surface-2);border:1px solid var(--border);" +
       "border-radius:12px;padding:12px 6px;display:flex;flex-direction:column;align-items:center;gap:5px;}" +
+      ".profile-hub-badge-locked{filter:grayscale(1);opacity:.42;}" +
       ".profile-hub-badge-icon{font-size:22px;opacity:.9;}" +
       ".profile-hub-badge-label{font-family:'Cairo',sans-serif;font-size:10.5px;color:var(--text-dim);}" +
       ".profile-hub-account-row{margin-top:20px;}" +
@@ -2359,77 +2485,166 @@
     document.head.appendChild(styleEl);
   }
 
-  function ensureAuthGate(){
+  function ensureAuthModal(){
     injectAuthStyles();
-    if(document.getElementById("authGateOverlay")) return;
+    if(document.getElementById("authModalOverlay")) return;
 
     var overlay = document.createElement("div");
-    overlay.id = "authGateOverlay";
-    overlay.className = "auth-gate-overlay";
+    overlay.id = "authModalOverlay";
+    overlay.className = "auth-modal-overlay";
     overlay.innerHTML =
-      "<div class=\"auth-gate-card\">" +
-        "<div class=\"auth-gate-logo\">🌙</div>" +
-        "<div class=\"auth-gate-title\">سَكينة</div>" +
-        "<div class=\"auth-gate-sub\">رفيقك في بناء العادات والقرب من الله</div>" +
-        "<button type=\"button\" class=\"auth-gate-btn auth-gate-btn-google\" id=\"authGoogleBtn\">" +
-          "<span class=\"auth-gate-btn-icon\">G</span><span>المتابعة بحساب Google</span>" +
+      "<div class=\"auth-modal-card\">" +
+        "<button type=\"button\" class=\"auth-modal-close-x\" id=\"authModalCloseBtn\">✕</button>" +
+        "<div class=\"auth-modal-logo\">🌙</div>" +
+        "<div class=\"auth-modal-title\">سَكينة</div>" +
+        "<div class=\"auth-modal-sub\">رفيقك في بناء العادات والقرب من الله</div>" +
+        "<button type=\"button\" class=\"auth-modal-btn auth-modal-btn-google\" id=\"authGoogleBtn\">" +
+          "<span class=\"auth-modal-btn-icon\">G</span><span>المتابعة بحساب Google</span>" +
         "</button>" +
-        "<button type=\"button\" class=\"auth-gate-btn auth-gate-btn-guest\" id=\"authGuestBtn\">المتابعة كضيف</button>" +
-        "<div class=\"auth-gate-warning\">⚠️ حسابات الضيف لا يمكنها المشاركة في سحب العمرة المجانية، " +
-          "وقد تفقد بياناتك عند تغيير الجهاز أو حذف التطبيق. سجّل دخولك بحساب Google لحفظ تقدّمك " +
-          "ومزامنته عبر أجهزتك.</div>" +
+        "<div class=\"auth-modal-divider\">أو</div>" +
+        "<input type=\"email\" id=\"authEmailInput\" class=\"auth-modal-field\" placeholder=\"البريد الإلكتروني\" autocomplete=\"email\">" +
+        "<input type=\"password\" id=\"authPasswordInput\" class=\"auth-modal-field\" placeholder=\"كلمة المرور\" autocomplete=\"current-password\">" +
+        "<div class=\"auth-modal-error\" id=\"authModalError\"></div>" +
+        "<button type=\"button\" class=\"auth-modal-btn auth-modal-btn-submit\" id=\"authEmailSubmitBtn\">تسجيل الدخول</button>" +
+        "<button type=\"button\" class=\"auth-modal-toggle-mode\" id=\"authModeToggleBtn\">ليس لديك حساب؟ أنشئ حساباً جديداً</button>" +
+        "<button type=\"button\" class=\"auth-modal-btn auth-modal-btn-guest\" id=\"authGuestBtn\">المتابعة كضيف</button>" +
+        "<div class=\"auth-modal-warning\">⚠️ حسابات الضيف لا يمكنها المشاركة في سحب العمرة المجانية، " +
+          "وقد تفقد بياناتك عند تغيير الجهاز أو حذف التطبيق.</div>" +
       "</div>";
     document.body.appendChild(overlay);
 
+    var isSignUpMode = false;
+    function setSignUpMode(on){
+      isSignUpMode = on;
+      document.getElementById("authEmailSubmitBtn").textContent = isSignUpMode ? "إنشاء حساب" : "تسجيل الدخول";
+      document.getElementById("authModeToggleBtn").textContent = isSignUpMode
+        ? "لديك حساب بالفعل؟ سجّل الدخول" : "ليس لديك حساب؟ أنشئ حساباً جديداً";
+      document.getElementById("authModalError").textContent = "";
+    }
+
+    document.getElementById("authModeToggleBtn").addEventListener("click", function(){ setSignUpMode(!isSignUpMode); });
     document.getElementById("authGuestBtn").addEventListener("click", function(){
       saveAuthMode("guest");
-      hideAuthGate();
+      closeAuthModal();
     });
-
+    document.getElementById("authModalCloseBtn").addEventListener("click", closeAuthModal);
+    overlay.addEventListener("click", function(e){ if(e.target === overlay) closeAuthModal(); });
     document.getElementById("authGoogleBtn").addEventListener("click", function(){
-      var btn = document.getElementById("authGoogleBtn");
-      if(!window.SakinaCloud || !window.SakinaCloud.isReady() || typeof window.SakinaCloud.signInWithGoogle !== "function"){
-        showToast("⚠️ تسجيل الدخول بجوجل غير متاح حالياً — يمكنك المتابعة كضيف والربط لاحقاً");
-        return;
-      }
-      btn.disabled = true;
-      btn.innerHTML = "<span>⏳ جاري تسجيل الدخول...</span>";
-      window.SakinaCloud.signInWithGoogle().then(function(){
-        saveAuthMode("google");
-        hideAuthGate();
-      }).catch(function(err){
-        console.warn("Sakina: فشل تسجيل الدخول بجوجل", err);
-        btn.disabled = false;
-        btn.innerHTML = "<span class=\"auth-gate-btn-icon\">G</span><span>المتابعة بحساب Google</span>";
-        showToast("⚠️ تعذّر تسجيل الدخول بجوجل — حاول مرة أخرى أو تابع كضيف");
-      });
+      attemptGoogleSignIn(document.getElementById("authGoogleBtn"));
+    });
+    document.getElementById("authEmailSubmitBtn").addEventListener("click", function(){
+      attemptEmailAuth(isSignUpMode);
     });
   }
 
-  function hideAuthGate(){
-    var overlay = document.getElementById("authGateOverlay");
+  function attemptGoogleSignIn(btn){
+    var originalHTML = btn.innerHTML;
+    if(!window.SakinaCloud || !window.SakinaCloud.isReady() || typeof window.SakinaCloud.signInWithGoogle !== "function"){
+      showToast("⚠️ تسجيل الدخول بجوجل غير متاح حالياً — يمكنك المتابعة كضيف والربط لاحقاً");
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = "<span>⏳ جاري تسجيل الدخول...</span>";
+
+    window.SakinaCloud.signInWithGoogle().then(function(){
+      saveAuthMode("google");
+      closeAuthModal();
+    }).catch(function(err){
+      console.warn("Sakina: فشل تسجيل الدخول بجوجل (نافذة منبثقة)", err);
+      // بعض متصفحات الجوال أو الأنظمة المضمّنة (WebView) تحظر النوافذ
+      // المنبثقة؛ نحاول تلقائياً بديل إعادة التوجيه إن كان متاحاً
+      if(window.SakinaCloud && typeof window.SakinaCloud.signInWithGoogleRedirect === "function"){
+        window.SakinaCloud.signInWithGoogleRedirect().catch(function(redirectErr){
+          console.warn("Sakina: فشل بديل إعادة التوجيه أيضاً", redirectErr);
+          btn.disabled = false;
+          btn.innerHTML = originalHTML;
+          showToast("⚠️ تعذّر تسجيل الدخول بجوجل — حاول مرة أخرى أو تابع كضيف");
+        });
+      }else{
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+        showToast("⚠️ تعذّر تسجيل الدخول بجوجل — حاول مرة أخرى أو تابع كضيف");
+      }
+    });
+  }
+
+  function attemptEmailAuth(isSignUp){
+    var emailEl = document.getElementById("authEmailInput");
+    var passEl = document.getElementById("authPasswordInput");
+    var errEl = document.getElementById("authModalError");
+    var btn = document.getElementById("authEmailSubmitBtn");
+
+    var email = (emailEl.value || "").trim();
+    var password = passEl.value || "";
+    errEl.textContent = "";
+
+    if(!email || email.indexOf("@") === -1){
+      errEl.textContent = "⚠️ يرجى إدخال بريد إلكتروني صحيح";
+      return;
+    }
+    if(password.length < 6){
+      errEl.textContent = "⚠️ كلمة المرور يجب أن تكون ٦ أحرف على الأقل";
+      return;
+    }
+
+    var bridgeFn = isSignUp
+      ? (window.SakinaCloud && window.SakinaCloud.signUpWithEmail)
+      : (window.SakinaCloud && window.SakinaCloud.signInWithEmail);
+
+    if(!window.SakinaCloud || !window.SakinaCloud.isReady() || typeof bridgeFn !== "function"){
+      errEl.textContent = "⚠️ الدخول بالبريد الإلكتروني غير مفعّل حالياً على هذا الإصدار";
+      return;
+    }
+
+    btn.disabled = true;
+    var originalLabel = btn.textContent;
+    btn.textContent = "⏳ جاري المعالجة...";
+
+    bridgeFn(email, password).then(function(){
+      saveAuthMode("email");
+      closeAuthModal();
+    }).catch(function(err){
+      console.warn("Sakina: فشل الدخول بالبريد الإلكتروني", err);
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      errEl.textContent = "⚠️ تعذّرت العملية — تحقق من البيانات وحاول مرة أخرى";
+    });
+  }
+
+  function openAuthModal(mode){
+    ensureAuthModal();
+    var closeBtn = document.getElementById("authModalCloseBtn");
+    var guestBtn = document.getElementById("authGuestBtn");
+
+    if(mode === "gate"){
+      if(closeBtn) closeBtn.style.display = "none"; // بوابة الإقلاع الأولى: لا إغلاق بلا اختيار
+      if(guestBtn) guestBtn.style.display = "";
+    }else{
+      if(closeBtn) closeBtn.style.display = "";
+      if(guestBtn) guestBtn.style.display = "none"; // المستخدم ضيف بالفعل هنا؛ الإغلاق يعادل البقاء ضيفاً
+    }
+
+    document.getElementById("authEmailInput").value = "";
+    document.getElementById("authPasswordInput").value = "";
+    document.getElementById("authModalError").textContent = "";
+
+    requestAnimationFrame(function(){
+      var overlay = document.getElementById("authModalOverlay");
+      if(overlay) overlay.classList.add("open");
+    });
+  }
+
+  function closeAuthModal(){
+    var overlay = document.getElementById("authModalOverlay");
     if(overlay) overlay.classList.remove("open");
     renderProfileHub();
   }
 
   function showAuthGateIfNeeded(){
     var mode = loadAuthMode();
-    if(mode === "guest" || mode === "google") return;
-    ensureAuthGate();
-    requestAnimationFrame(function(){
-      var overlay = document.getElementById("authGateOverlay");
-      if(overlay) overlay.classList.add("open");
-    });
+    if(mode === "guest" || mode === "google" || mode === "email") return;
+    openAuthModal("gate");
   }
-
-  var PROFILE_BADGE_SLOTS = [
-    { icon: "📿", label: "الأذكار" },
-    { icon: "🔥", label: "الاستمرارية" },
-    { icon: "📖", label: "القرآن" },
-    { icon: "🕋", label: "الصلاة" },
-    { icon: "🌙", label: "قيام الليل" },
-    { icon: "🤲", label: "الدعاء" }
-  ];
 
   function ensureProfileHubUI(){
     injectAuthStyles();
@@ -2489,12 +2704,53 @@
     if(overlay) overlay.classList.remove("open");
   }
 
+  // لا توجد أوسمة وهمية جاهزة: هذا العدد يمثّل عدد الخانات المقفلة
+  // المعروضة فقط كتصميم بصري إلى حين بناء نظام إنجازات حقيقي يمنح أوسمة
+  // فعلية بحسب سلوك المستخدم الحقيقي
+  var PROFILE_LOCKED_BADGE_SLOTS = 6;
+
+  function renderProfileBadges(earnedBadges){
+    var badgesGrid = document.getElementById("profileHubBadgesGrid");
+    if(!badgesGrid) return;
+    badgesGrid.innerHTML = "";
+
+    if(!earnedBadges || earnedBadges.length === 0){
+      var emptyMsg = document.createElement("div");
+      emptyMsg.className = "profile-hub-badges-empty";
+      emptyMsg.textContent = "لا يوجد أوسمة مكتسبة بعد";
+      badgesGrid.appendChild(emptyMsg);
+
+      var lockedGrid = document.createElement("div");
+      lockedGrid.className = "profile-hub-badges-locked-grid";
+      for(var i = 0; i < PROFILE_LOCKED_BADGE_SLOTS; i++){
+        var lockedCell = document.createElement("div");
+        lockedCell.className = "profile-hub-badge-cell profile-hub-badge-locked";
+        lockedCell.innerHTML = "<div class=\"profile-hub-badge-icon\">🔒</div>";
+        lockedGrid.appendChild(lockedCell);
+      }
+      badgesGrid.appendChild(lockedGrid);
+      return;
+    }
+
+    // عند توفّر نظام إنجازات حقيقي مستقبلاً، تُعرض الأوسمة المكتسبة فعلياً هنا
+    var earnedGrid = document.createElement("div");
+    earnedGrid.className = "profile-hub-badges-locked-grid";
+    earnedBadges.forEach(function(b){
+      var cell = document.createElement("div");
+      cell.className = "profile-hub-badge-cell";
+      cell.innerHTML = "<div class=\"profile-hub-badge-icon\">" + b.icon + "</div>" +
+        "<div class=\"profile-hub-badge-label\">" + b.label + "</div>";
+      earnedGrid.appendChild(cell);
+    });
+    badgesGrid.appendChild(earnedGrid);
+  }
+
   function renderProfileHub(){
     ensureProfileHubUI();
 
     var user = (window.SakinaCloud && typeof window.SakinaCloud.getCurrentUser === "function")
       ? window.SakinaCloud.getCurrentUser() : null;
-    var isGoogleUser = !!(user && !user.isAnonymous);
+    var isRegistered = !!(user && !user.isAnonymous);
 
     var avatarEl = document.getElementById("profileHubAvatar");
     var miniAvatarEl = document.getElementById("profileHubAvatarMini");
@@ -2502,52 +2758,32 @@
     var titleEl = document.getElementById("profileHubTitle");
     var idEl = document.getElementById("profileHubId");
     var accountRow = document.getElementById("profileHubAccountRow");
-    var badgesGrid = document.getElementById("profileHubBadgesGrid");
     if(!avatarEl || !nameEl) return;
 
-    if(isGoogleUser && user.photoURL){
+    if(isRegistered && user.photoURL){
       avatarEl.innerHTML = "<img src=\"" + user.photoURL + "\" alt=\"\" class=\"profile-hub-avatar-img\">";
       if(miniAvatarEl) miniAvatarEl.innerHTML = "<img src=\"" + user.photoURL + "\" alt=\"\" class=\"profile-hub-mini-img\">";
     }else{
-      var initial = (isGoogleUser && user.displayName) ? user.displayName.trim().charAt(0).toUpperCase() : "🧑";
+      var initial = (isRegistered && (user.displayName || user.email)) ?
+        (user.displayName || user.email).trim().charAt(0).toUpperCase() : "🧑";
       avatarEl.textContent = initial;
-      if(miniAvatarEl) miniAvatarEl.textContent = isGoogleUser ? initial : "🧑";
+      if(miniAvatarEl) miniAvatarEl.textContent = isRegistered ? initial : "🧑";
     }
 
-    nameEl.textContent = isGoogleUser ? (user.displayName || "مستخدم سَكينة") : "ضيف";
-    titleEl.textContent = isGoogleUser ? "🌟 عضو مسجّل" : "🌱 وضع الضيف";
-    idEl.textContent = "ID: " + (isGoogleUser ? user.uid.slice(0, 8).toUpperCase() : getOrCreateLocalId());
+    nameEl.textContent = isRegistered ? (user.displayName || user.email || "مستخدم سَكينة") : "ضيف";
+    titleEl.textContent = isRegistered ? "🌟 عضو مسجّل" : "🌱 وضع الضيف";
+    idEl.textContent = "ID: " + (isRegistered ? user.uid.slice(0, 8).toUpperCase() : getOrCreateLocalId());
 
-    badgesGrid.innerHTML = "";
-    PROFILE_BADGE_SLOTS.forEach(function(b){
-      var cell = document.createElement("div");
-      cell.className = "profile-hub-badge-cell";
-      cell.innerHTML = "<div class=\"profile-hub-badge-icon\">" + b.icon + "</div>" +
-        "<div class=\"profile-hub-badge-label\">" + b.label + "</div>";
-      badgesGrid.appendChild(cell);
-    });
+    // لا يوجد بعد نظام إنجازات فعلي يمنح أوسمة، لذا القائمة فارغة دوماً حالياً
+    renderProfileBadges([]);
 
     accountRow.innerHTML = "";
-    if(!isGoogleUser){
+    if(!isRegistered){
       var upgradeBtn = document.createElement("button");
       upgradeBtn.type = "button";
       upgradeBtn.className = "profile-hub-upgrade-btn";
-      upgradeBtn.textContent = "🔗 ربط حساب Google";
-      upgradeBtn.addEventListener("click", function(){
-        if(!window.SakinaCloud || !window.SakinaCloud.isReady() || typeof window.SakinaCloud.signInWithGoogle !== "function"){
-          showToast("⚠️ تسجيل الدخول بجوجل غير متاح حالياً");
-          return;
-        }
-        upgradeBtn.disabled = true;
-        window.SakinaCloud.signInWithGoogle().then(function(){
-          saveAuthMode("google");
-          renderProfileHub();
-        }).catch(function(err){
-          console.warn("Sakina: فشل ربط حساب جوجل", err);
-          upgradeBtn.disabled = false;
-          showToast("⚠️ تعذّر تسجيل الدخول بجوجل");
-        });
-      });
+      upgradeBtn.textContent = "🔗 تسجيل الدخول / ربط حساب";
+      upgradeBtn.addEventListener("click", function(){ openAuthModal("link"); });
       accountRow.appendChild(upgradeBtn);
 
       var warn = document.createElement("div");
@@ -2558,6 +2794,12 @@
   }
 
   window.addEventListener("sakina-auth-changed", function(){
+    var user = (window.SakinaCloud && typeof window.SakinaCloud.getCurrentUser === "function")
+      ? window.SakinaCloud.getCurrentUser() : null;
+    if(user && !user.isAnonymous){
+      var providerId = (user.providerData && user.providerData[0] && user.providerData[0].providerId) || "";
+      saveAuthMode(providerId.indexOf("google") !== -1 ? "google" : "email");
+    }
     renderProfileHub();
   });
 
@@ -4114,6 +4356,10 @@
     }
     if(target === "quran"){
       setTimeout(fitMushafFrameToViewport, 60);
+    }else{
+      // الخروج من قسم القرآن كلياً (لأي تبويب آخر) يجب أن يُلغي وضع
+      // القراءة الغامر دوماً، وإلا بقيت الترويسة مخفية عن بقية التطبيق
+      document.body.classList.remove("quran-immersive-active");
     }
   }
 
